@@ -1,6 +1,12 @@
 # 知时 · 学习与工作
 
-个人 Android App，包名 `com.insight.quantlife`，版本 1.4.2（versionCode 10）。Java 原生宿主 + 本地 HTML/CSS/JavaScript UI，无需后台服务器。
+个人 Android App，包名 `com.insight.quantlife`，版本 1.4.3（versionCode 11）。Java 原生宿主 + 本地 HTML/CSS/JavaScript UI，无需后台服务器。
+
+手机用户请先读 [用户使用说明](docs/用户使用说明.md)。App 内入口：设置 → 关于知时 → 使用说明；随安装包保存，无需联网。
+
+1.4.3验证：87项Node、34项生产轨迹过滤回归、18项Android11截图／离线说明／覆盖升级检查通过（139项）。在1.4.2种入合成记录及虚构密钥，再覆盖安装1.4.3；核对原记录、学习目标和加密配置保留。关闭模拟器Wi-Fi和移动数据后打开说明，核对10个章节、滚动、返回、关闭、重开和无横向溢出；实际系统截图已人工查看。未在小米实体机验证系统截图手势或长截图，未使用真实模型Key，也未重新跑旧版本所有网络测试。
+
+1.4.3明确允许用户主动进行系统截图，新增折叠式离线使用说明，涵盖学习／工作、API Key 配置、AI 与链接读取、轨迹、备份恢复及隐私。不自行截屏或上传屏幕，不绕过设备管理策略。截图和系统最近任务预览可能显示敏感笔记或位置，分享前应检查。
 
 1.4.2修复微信短链接紧接中文说明时把说明吞进URL的问题；只按已知微信公众号/s/ID格式分离，不全局截断合法中文网址。保留用户提供的文章要点，不以网页摘要替换。新增conversation.js，将记录、文章问题、历史查询、主题回顾、规律分析分开：新文章记录／问题不传全量统计、每日序列、无关Wiki和上轮长答；记录回复按应用实际接纳的候选数量生成简短状态，不使用模型的占位标题承诺或无关长答。来源状态可折叠展开。
 
@@ -87,7 +93,7 @@ setup 从官方 Azul / Google 下载任务本地JDK17、API35平台和build-tool
 
 ```powershell
 node .\tools\mock-ai.cjs
-# 另一个终端：先安装 build/quantlife-1.4.2.apk 和 build/test/tests.apk 到专用测试模拟器
+# 另一个终端：先安装 build/quantlife-1.4.3.apk 和 build/test/tests.apk 到专用测试模拟器
 # SmokeTest需要空白测试数据，勿在升级验证的中途运行。
 .\tools\android\platform-tools\adb.exe -s emulator-5582 shell am instrument -w com.insight.quantlife.tests/com.insight.quantlife.tests.SmokeTest
 ```

@@ -19,6 +19,7 @@ import android.security.keystore.KeyProperties;
 import android.util.Base64;
 import android.view.View;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -68,6 +69,8 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        // Allow user-initiated system screenshots; never capture or upload the screen ourselves.
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         store = new Store();
         tracks = new TrackStore(this);
         getWindow().setStatusBarColor(0xfff6f5f0);
