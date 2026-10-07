@@ -1,0 +1,7 @@
+{
+  "name": "quantlife",
+  "version": "1.4.2",
+  "private": true,
+  "scripts": {"test": "node --test test/*.test.cjs", "preview": "node tools/preview.cjs"},
+  "devDependencies": {"esbuild": "0.25.12"}
+}

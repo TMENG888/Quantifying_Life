@@ -1,0 +1,13 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.insight.quantlife'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.insight.quantlife'
+        minSdk 26
+        targetSdk 35
+        versionCode 10
+        versionName '1.4.2'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}

@@ -1,0 +1,13 @@
+PDF.js / pdfjs-dist 3.11.174
+Copyright 2023 Mozilla Foundation.
+Licensed under Apache License, Version 2.0; see LICENSE in this directory.
+Upstream: https://github.com/mozilla/pdf.js
+Published distribution: https://www.npmjs.com/package/pdfjs-dist
+
+Changes in this application:
+- Legacy distribution JavaScript mechanically transpiled/minified with esbuild for Chrome 83.
+- Local compatibility polyfills prepended for Array/String/TypedArray.at and String.replaceAll.
+- PDF evaluation disabled at runtime; files are used for extracting text, not rendering executable content.
+
+esbuild 0.25.12 is a development-only build tool, not an application runtime dependency.
+Its original MIT license is supplied with its npm package.

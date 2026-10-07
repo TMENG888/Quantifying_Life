@@ -1,0 +1,24 @@
+package com.insight.quantlife.tests;
+import android.app.Activity;import android.app.Instrumentation;import android.content.Intent;import android.graphics.Bitmap;import android.os.Bundle;import android.webkit.WebView;import org.json.JSONObject;import java.io.File;import java.io.FileOutputStream;import java.lang.reflect.*;import java.util.concurrent.*;
+public class BeforeUpdateTest extends Instrumentation{
+ private MainHost host;
+ @Override public void onCreate(Bundle b){super.onCreate(b);start();}
+ @Override public void onStart(){Bundle result=new Bundle();try{
+  host=new MainHost(this);host.open();
+  String learning="{\"id\":\"upgrade-survivor\",\"type\":\"learning\",\"date\":\"2026-09-06\",\"title\":\"JEV历史学习笔记\",\"platform\":\"知乎\",\"durationMinutes\":60,\"note\":\"升级前笔记必须保留：JEV模型应用案例\",\"tags\":[\"JEV\"],\"contentType\":\"article\"}";
+  String work="{\"id\":\"upgrade-work\",\"type\":\"work\",\"date\":\"2026-09-06\",\"title\":\"历史工作\",\"workStart\":\"2026-09-06T09:00:00\",\"workEnd\":\"2026-09-06T18:00:00\",\"breaks\":[{\"start\":\"2026-09-06T12:00:00\",\"end\":\"2026-09-06T13:00:00\"}],\"durationMinutes\":480}";
+  host.call("saveRecord",new JSONObject().put("record",new JSONObject(learning)));host.call("saveRecord",new JSONObject().put("record",new JSONObject(work)));
+  host.js("document.querySelector('#quick-add').click();document.querySelector('#record-platform').focus()");Thread.sleep(300);org.json.JSONArray point=new org.json.JSONArray(host.js("(()=>{const r=document.querySelector('#record-platform').getBoundingClientRect();return [(r.left+r.right)/2,(r.top+r.bottom)/2,innerWidth];})()"));float x=(float)(point.getDouble(0)*host.web.getWidth()/point.getDouble(2)),y=(float)(point.getDouble(1)*host.web.getWidth()/point.getDouble(2));runOnMainSync(()->{long time=android.os.SystemClock.uptimeMillis();android.view.MotionEvent down=android.view.MotionEvent.obtain(time,time,android.view.MotionEvent.ACTION_DOWN,x,y,0),up=android.view.MotionEvent.obtain(time,time+40,android.view.MotionEvent.ACTION_UP,x,y,0);host.web.dispatchTouchEvent(down);host.web.dispatchTouchEvent(up);down.recycle();up.recycle();});Thread.sleep(600);host.screenshot("platform-before.png");
+  result.putString("stream","PASS old version native datalist present: "+host.js("document.querySelector('#record-platform').getAttribute('list')")+"; migration seed records saved.\n");finish(Activity.RESULT_OK,result);
+ }catch(Throwable e){result.putString("stream","FAIL before update: "+e+"\n");finish(Activity.RESULT_CANCELED,result);}}
+}
+class MainHost{
+ final Instrumentation test;Activity activity;WebView web;Method execute;
+ MainHost(Instrumentation t){test=t;}
+ void open()throws Exception{Intent i=new Intent();i.setClassName(test.getTargetContext(),"com.insight.quantlife.MainActivity");i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);activity=test.startActivitySync(i);Field f=activity.getClass().getDeclaredField("web");f.setAccessible(true);web=(WebView)f.get(activity);execute=activity.getClass().getDeclaredMethod("execute",String.class,JSONObject.class);execute.setAccessible(true);for(int j=0;j<80;j++){if(js("document.body&&document.body.innerText").contains("今天的投入"))return;Thread.sleep(100);}throw new Exception("App startup timeout");}
+ String js(String s)throws Exception{CountDownLatch latch=new CountDownLatch(1);String[] value={""};test.runOnMainSync(()->web.evaluateJavascript(s,r->{value[0]=r;latch.countDown();}));if(!latch.await(10,TimeUnit.SECONDS))throw new Exception("JS timeout");return value[0];}
+ Object call(String name,JSONObject p)throws Exception{return execute.invoke(activity,name,p);}
+ void tap(String selector,boolean arrow)throws Exception{org.json.JSONArray point=new org.json.JSONArray(js("(()=>{const r=document.querySelector("+JSONObject.quote(selector)+").getBoundingClientRect();return ["+(arrow?"r.right-12":"(r.left+r.right)/2")+",(r.top+r.bottom)/2,innerWidth];})()"));float x=(float)(point.getDouble(0)*web.getWidth()/point.getDouble(2)),y=(float)(point.getDouble(1)*web.getWidth()/point.getDouble(2));test.runOnMainSync(()->{long time=android.os.SystemClock.uptimeMillis();android.view.MotionEvent down=android.view.MotionEvent.obtain(time,time,android.view.MotionEvent.ACTION_DOWN,x,y,0),up=android.view.MotionEvent.obtain(time,time+40,android.view.MotionEvent.ACTION_UP,x,y,0);web.dispatchTouchEvent(down);web.dispatchTouchEvent(up);down.recycle();up.recycle();});}
+ boolean waitText(String s)throws Exception{for(int i=0;i<100;i++){if(js("document.body.innerText").contains(s))return true;Thread.sleep(100);}return false;}
+ void screenshot(String name)throws Exception{test.waitForIdleSync();Thread.sleep(500);File dir=new File(test.getTargetContext().getFilesDir(),"qa");dir.mkdirs();Bitmap bitmap=test.getUiAutomation().takeScreenshot();try(FileOutputStream out=new FileOutputStream(new File(dir,name))){bitmap.compress(Bitmap.CompressFormat.PNG,100,out);}bitmap.recycle();}
+}

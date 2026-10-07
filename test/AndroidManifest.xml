@@ -1,0 +1,33 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.insight.quantlife.tests">
+  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+  <application android:label="QuantLife local smoke tests" />
+  <instrumentation android:name="com.insight.quantlife.tests.ArticleReadTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ArticleLiveTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.BeforeExaUpgradeTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ExaUpgradeTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ExaMcpTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ExaLiveTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.BeforeLinkUpgradeTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.LinkUpgradeTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.LinkReaderTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.LinkFlowTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.SmokeTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.BeforeGapFixTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.GapFixTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.SparseTrackSeedTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.SparseTrackTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.BridgeSeedTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.BridgeOverlayTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.BeforeTrackRefinementTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.TrackRefinementTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.OfflineMapUiTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.LiveGpsRefinementTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.BeforeUpdateTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.UpdateTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.BeforeTrackUpgradeTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.TrackTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.MapTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.TrackPermissionTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.PrimeTrackingBootTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.TrackingBootSettingsTest" android:targetPackage="com.insight.quantlife" />
+</manifest>
