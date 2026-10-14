@@ -37,7 +37,7 @@ public class TrackingService extends Service implements LocationListener {
         prefs(TrackingService.this).edit().putLong("heartbeat",System.currentTimeMillis()).apply();
         if(!precise(TrackingService.this)){stopWith("定位权限已撤销，记录停止",true);return;}
         if(!locationEnabled(TrackingService.this)){prefs(TrackingService.this).edit().putString("message","系统定位已关闭，无法获取位置").apply();}
-        else if(previous!=null&&System.currentTimeMillis()-previous.getTime()>30000){prefs(TrackingService.this).edit().putString("message","GPS暂时缺失 · 缺失位置不补画，恢复后可能分段").apply();}
+        else if(previous!=null&&System.currentTimeMillis()-previous.getTime()>30000){prefs(TrackingService.this).edit().putString("message","GPS暂时缺失 · 没有新采样，缺口只作虚线参考").apply();}
         handler.postDelayed(this,30000);
     }catch(Exception e){stopWith("定位服务异常，请重新开启",true);}}};
     @Override public void onCreate(){super.onCreate();locations=(LocationManager)getSystemService(LOCATION_SERVICE);store=new TrackStore(this);}
@@ -71,10 +71,10 @@ public class TrackingService extends Service implements LocationListener {
             if(delta<4000)return;
         }
         JSONObject telemetry=new JSONObject();telemetry.put("fixAgeMs",age);telemetry.put("requestedIntervalMs",5000);if(gnssTime>0&&!l.isFromMockProvider()){telemetry.put("satellitesUsed",satellitesUsed);telemetry.put("gnssAgeMs",SystemClock.elapsedRealtime()-gnssTime);if(Double.isFinite(meanCn0))telemetry.put("meanCn0",meanCn0);}
-        if(store.add(l,session,telemetry)){previous=new Location(l);boolean weak=l.getAccuracy()>35||(!l.isFromMockProvider()&&gnssTime>0&&SystemClock.elapsedRealtime()-gnssTime<=15000&&(satellitesUsed<4||Double.isFinite(meanCn0)&&meanCn0<20));prefs(this).edit().putLong("lastPoint",l.getTime()).putString("message",weak?"GPS信号较弱 · 已保留诊断，不绘制不可信位置":"正在记录 · 信号空缺不连线").apply();}
+        if(store.add(l,session,telemetry)){previous=new Location(l);boolean poor=l.getAccuracy()>TrackVariants.MAX_ACCURACY;prefs(this).edit().putLong("lastPoint",l.getTime()).putString("message",poor?"定位误差估计超过65米 · 原始点已保存，暂不纳入轨迹":"正在记录 · 65米＋误差加权平滑").apply();}
     }catch(Exception e){prefs(this).edit().putString("message","位置保存失败，请检查手机可用空间").apply();}}
     private void reject(String reason){SharedPreferences p=prefs(this);p.edit().putInt("rejected",p.getInt("rejected",0)+1).putString("message",reason).apply();}
-    @Override public void onProviderDisabled(String provider){prefs(this).edit().putString("message","定位信号暂不可用，轨迹可能中断").apply();}
+    @Override public void onProviderDisabled(String provider){prefs(this).edit().putString("message","定位信号暂不可用，没有新采样；缺口只作虚线参考").apply();}
     @Override public void onProviderEnabled(String provider){prefs(this).edit().putString("message","信号恢复，等待有效定位").apply();}
     @Override public void onStatusChanged(String provider,int status,Bundle extras){}
     @Override public IBinder onBind(Intent i){return null;}

@@ -1,0 +1,19 @@
+package com.insight.quantlife.tests;
+import android.app.*;import android.os.*;import org.json.*;
+/** Synthetic AVD only: retain the chat framework, restore original brand tokens. */
+public class ChatThemeTest extends ChatRedesignTest {
+ void theme()throws Exception{
+  holdAutomation();JSONObject before=init();check(getTargetContext().getPackageManager().getPackageInfo(getTargetContext().getPackageName(),0).versionName.equals("1.7.2"),"Signed green-theme upgrade is 1.7.2");h.call("newChat",new JSONObject());reload();holdAutomation();click("[data-page=chat]");Thread.sleep(350);
+  jsCheck("getComputedStyle(document.body).backgroundColor==='rgb(246, 245, 240)'","Chat canvas restores original warm neutral background");
+  jsCheck("getComputedStyle(document.querySelector('.welcome-mark')).backgroundColor==='rgb(33, 106, 84)'","Welcome mark uses original brand green");
+  jsCheck("getComputedStyle(document.querySelector('.chat-context-label')).color==='rgb(33, 106, 84)'&&getComputedStyle(document.querySelector('.chat-context-label')).backgroundColor==='rgb(233, 240, 229)'","Context badge is green on original soft-green tint");
+  h.js("document.querySelector('#chat-input').value='合成配色检查';document.querySelector('#chat-input').dispatchEvent(new Event('input'))");jsCheck("getComputedStyle(document.querySelector('.chat-send')).backgroundColor==='rgb(33, 106, 84)'","Enabled send button is brand green, not blue");
+  jsCheck("getComputedStyle(document.querySelector('.bottom-nav .active')).color==='rgb(33, 106, 84)'","Active navigation uses same original green");
+  jsCheck("getComputedStyle(document.querySelector('.app-header')).display==='none'&&document.querySelectorAll('.chat-toolbar').length===1","Compact DeepSeek-style framework remains intact");
+  jsCheck("document.documentElement.scrollWidth<=innerWidth+1","Green theme has no horizontal overflow");
+  h.js("document.querySelector('#chat-input').value='';document.querySelector('#chat-input').dispatchEvent(new Event('input'))");h.screenshot("chat-green-home-1.7.2.png");click("[data-action=chat-history]");Thread.sleep(350);
+  jsCheck("getComputedStyle(document.querySelector('.drawer-new')).color==='rgb(33, 106, 84)'&&getComputedStyle(document.querySelector('.drawer-new')).backgroundColor==='rgb(233, 240, 229)'","Drawer new-chat entry matches original green theme");
+  jsCheck("(()=>{let r=document.querySelector('#chat-history-drawer').getBoundingClientRect();return r.left===0&&r.top===0&&r.width<innerWidth&&r.height>=innerHeight-1})()","Sidebar geometry is unchanged");h.screenshot("chat-green-history-1.7.2.png");click("#drawer-model");jsCheck("document.querySelector('#api-key')!==null","Model settings remain reachable from sidebar");click(".model-back");click("[data-action=chat-tools]");jsCheck("!document.querySelector('#chat-links')&&!document.querySelector('#link-settings-form')","Link configuration remains removed");click("#chat-wiki");jsCheck("!document.querySelector('#wiki-backfill')&&!document.querySelector('#wiki-retry')&&!document.querySelector('#wiki-auto-form')","Wiki remains internally automatic without setup controls");click("#close-editor");JSONObject after=init();check(before.getJSONArray("records").toString().equals(after.getJSONArray("records").toString())&&before.getJSONArray("wikiPages").toString().equals(after.getJSONArray("wikiPages").toString()),"Theme checks never change life records or knowledge pages");
+ }
+ @Override public void onStart(){Bundle out=new Bundle();try{h=new MainHost(this);h.open();if(phase.equals("keyboard")){keyboardUi();h.screenshot("chat-green-narrow-history-1.7.2.png");}else theme();out.putString("stream","PASS "+passed+" green-theme/UI checks; phase="+phase+"\n");finish(Activity.RESULT_OK,out);}catch(Throwable ex){out.putString("stream","FAIL after "+passed+": "+ex+"\n");finish(Activity.RESULT_CANCELED,out);}}
+}

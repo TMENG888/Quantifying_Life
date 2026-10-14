@@ -15,13 +15,24 @@ public final class TrackFilter {
         public Point copy(){Point p=new Point();p.id=id;p.time=time;p.lat=lat;p.lon=lon;p.accuracy=accuracy;p.reportedAccuracy=reportedAccuracy;p.reportedSpeed=reportedSpeed;p.speed=speed;p.speedAccuracy=speedAccuracy;p.session=session;p.provider=provider;p.mocked=mocked;p.filtered=filtered;p.breakBefore=breakBefore;p.satellitesUsed=satellitesUsed;p.meanCn0=meanCn0;p.gnssAgeMs=gnssAgeMs;return p;}
         public boolean reliableSpeed(){return "gps".equals(provider)&&Double.isFinite(speed)&&speed>=0&&speed<=MAX_SPEED&&Double.isFinite(speedAccuracy)&&speedAccuracy>=0&&speedAccuracy<=0.6;}
     }
-    public static boolean valid(Point p){return p!=null&&Double.isFinite(p.lat)&&Double.isFinite(p.lon)&&Math.abs(p.lat)<=90&&Math.abs(p.lon)<=180&&p.time>0&&p.accuracy>0&&p.accuracy<=MAX_ACCURACY&&Double.isFinite(p.accuracy)&&p.session!=null&&!p.session.isEmpty()&&"gps".equals(p.provider)&&!(p.gnssAgeMs>=0&&p.gnssAgeMs<=15000&&(p.satellitesUsed>=0&&p.satellitesUsed<4||Double.isFinite(p.meanCn0)&&p.meanCn0<20));}
+    public static boolean valid(Point p){return valid(p,MAX_ACCURACY,0);}
+    // signalMode: 0 legacy; 1 zero used satellites is unknown; 2 GNSS telemetry is advisory only.
+    public static boolean valid(Point p,double maxAccuracy,int signalMode){
+        if(!Double.isFinite(maxAccuracy)||maxAccuracy<=0||maxAccuracy>100||signalMode<0||signalMode>2)return false;
+        if(p==null||!Double.isFinite(p.lat)||!Double.isFinite(p.lon)||Math.abs(p.lat)>90||Math.abs(p.lon)>180||p.time<=0||!Double.isFinite(p.accuracy)||p.accuracy<=0||p.accuracy>maxAccuracy||p.session==null||p.session.isEmpty()||!"gps".equals(p.provider))return false;
+        if(signalMode==2||signalMode==1&&p.satellitesUsed==0)return true;
+        return !(p.gnssAgeMs>=0&&p.gnssAgeMs<=15000&&(p.satellitesUsed>=0&&p.satellitesUsed<4||Double.isFinite(p.meanCn0)&&p.meanCn0<20));
+    }
     public static double distance(Point a,Point b){double x=Math.toRadians(b.lat-a.lat),y=Math.toRadians(b.lon-a.lon),h=Math.sin(x/2)*Math.sin(x/2)+Math.cos(Math.toRadians(a.lat))*Math.cos(Math.toRadians(b.lat))*Math.sin(y/2)*Math.sin(y/2);return 6371008.8*2*Math.asin(Math.sqrt(Math.min(1,h)));}
     private static boolean continuity(Point a,Point b){return !b.breakBefore&&a.session.equals(b.session)&&b.time>a.time&&b.time-a.time<=GAP;}
     private static double uncertainty(Point a,Point b){return Math.max(12,2*(a.accuracy+b.accuracy));}
     private static Point pinned(Point sample,Point anchor){Point p=sample.copy();p.lat=anchor.lat;p.lon=anchor.lon;p.accuracy=anchor.accuracy;p.filtered=distance(sample,anchor)>0.01;p.speed=0;return p;}
     public static List<Point> apply(List<Point> source){
-        List<Point> ordered=new ArrayList<>(),good=new ArrayList<>(),out=new ArrayList<>();for(Point p:source)if(p!=null)ordered.add(p);ordered.sort(Comparator.comparingLong(p->p.time));int missing=0;for(Point p:ordered){if(valid(p)){Point q=p.copy();q.reportedAccuracy=p.accuracy;q.reportedSpeed=p.speed;if(missing>=2)q.breakBefore=true;good.add(q);missing=0;}else missing++;}
+        return apply(source,MAX_ACCURACY,0);
+    }
+    public static List<Point> apply(List<Point> source,double maxAccuracy,int signalMode){
+        if(!Double.isFinite(maxAccuracy)||maxAccuracy<=0||maxAccuracy>100||signalMode<0||signalMode>2)throw new IllegalArgumentException("Invalid experimental filter policy");
+        List<Point> ordered=new ArrayList<>(),good=new ArrayList<>(),out=new ArrayList<>();for(Point p:source)if(p!=null)ordered.add(p);ordered.sort(Comparator.comparingLong(p->p.time));int missing=0;for(Point p:ordered){if(valid(p,maxAccuracy,signalMode)){Point q=p.copy();q.reportedAccuracy=p.accuracy;q.reportedSpeed=p.speed;if(missing>=2)q.breakBefore=true;good.add(q);missing=0;}else missing++;}
         List<Point> cleaned=new ArrayList<>();
         for(int i=0;i<good.size();i++){
             Point p=good.get(i),prev=cleaned.isEmpty()?null:cleaned.get(cleaned.size()-1),next=i+1<good.size()?good.get(i+1):null;

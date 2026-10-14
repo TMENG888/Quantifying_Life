@@ -35,8 +35,19 @@ public final class OfflineMap {
         }finally{if(tmp.isFile())tmp.delete();}
     }
     public static synchronized JSONObject tile(Context context,int z,int x,int y)throws Exception{
-        if(file(context).isFile())try(SQLiteDatabase db=SQLiteDatabase.openDatabase(file(context).getPath(),null,SQLiteDatabase.OPEN_READONLY);Cursor c=db.rawQuery("SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=? LIMIT 1",new String[]{String.valueOf(z),String.valueOf(x),String.valueOf((1<<z)-1-y)})){
-            if(c.moveToFirst()){byte[] bytes=c.getBlob(0);return new JSONObject().put("data","data:"+mime(bytes)+";base64,"+Base64.encodeToString(bytes,Base64.NO_WRAP));}
+        return lookup(context,z,x,y,false);
+    }
+    public static synchronized JSONObject tileOrAncestor(Context context,int z,int x,int y)throws Exception{
+        return lookup(context,z,x,y,true);
+    }
+    private static JSONObject lookup(Context context,int z,int x,int y,boolean parents)throws Exception{
+        if(file(context).isFile())try(SQLiteDatabase db=SQLiteDatabase.openDatabase(file(context).getPath(),null,SQLiteDatabase.OPEN_READONLY)){
+            int min=parents?Math.max(0,info(context).optInt("minZoom",0)):z;
+            for(int sourceZ=z;sourceZ>=min;sourceZ--){int scale=1<<(z-sourceZ),sourceX=x/scale,sourceY=y/scale;
+                try(Cursor c=db.rawQuery("SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=? LIMIT 1",new String[]{String.valueOf(sourceZ),String.valueOf(sourceX),String.valueOf((1<<sourceZ)-1-sourceY)})){
+                    if(c.moveToFirst()){byte[] bytes=c.getBlob(0);return new JSONObject().put("data","data:"+mime(bytes)+";base64,"+Base64.encodeToString(bytes,Base64.NO_WRAP)).put("sourceZ",sourceZ).put("sourceX",sourceX).put("sourceY",sourceY).put("source","package");}
+                }
+            }
         }
         return null;
     }

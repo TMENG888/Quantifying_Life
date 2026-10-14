@@ -1,6 +1,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.insight.quantlife.tests">
   <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
   <application android:label="QuantLife local smoke tests" />
+  <instrumentation android:name="com.insight.quantlife.tests.WorkCalendarWikiTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.WorkLogSplitTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.WorkFactsTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.WorkClockTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ChatThemeTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ChatRedesignTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ChatExperienceTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ModelConfigurationTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.AgentIntegrationTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ThoughtModuleTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.MapViewportTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.TrackComparisonTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.TimelineBridgeTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.HelpScreenshotTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.ArticleReadTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.ArticleLiveTest" android:targetPackage="com.insight.quantlife" />

@@ -60,6 +60,8 @@ public class MainActivity extends Activity {
     private String exportLabel="备份已保存（不包含 API Key；轨迹需单独导出）";
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService tasks = Executors.newFixedThreadPool(3);
+    // Slow tiles must never occupy workers used by mode switching or life records.
+    private final ExecutorService mapTasks = Executors.newFixedThreadPool(2);
     private byte[] exportBytes;
     private String pickKind = "attachment";
     private boolean loaded;
@@ -106,7 +108,7 @@ public class MainActivity extends Activity {
     }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); if(loaded)handleShare(intent);else pendingShare=intent; }
     @Override public void onBackPressed() { web.evaluateJavascript("window.appBack && window.appBack()",value->{if(!"true".equals(value))super.onBackPressed();}); }
-    @Override protected void onDestroy() { tasks.shutdownNow(); if(tracks!=null)tracks.close(); if(web!=null){web.removeJavascriptInterface("LifeNative");web.destroy();} super.onDestroy(); }
+    @Override protected void onDestroy() { MapTiles.cancelRequests(); mapTasks.shutdownNow(); tasks.shutdownNow(); if(tracks!=null)tracks.close(); if(web!=null){web.removeJavascriptInterface("LifeNative");web.destroy();} super.onDestroy(); }
 
     private JSONObject trackingStatus()throws Exception{
         SharedPreferences p=TrackingService.prefs(this);JSONObject s=new JSONObject();
@@ -117,7 +119,9 @@ public class MainActivity extends Activity {
         s.put("resumeAfterReboot",p.getBoolean("resumeAfterReboot",false));s.put("mapConsent",p.getBoolean("mapConsent",false));s.put("lastPoint",p.getLong("lastPoint",0));
         s.put("mapProvider",p.getString("mapProvider","osm"));s.put("mapKeyConfigured",!privateSettings().optString("mapTileKey").isEmpty());
         s.put("mapMode",p.getString("mapMode","offline"));s.put("offlineMap",OfflineMap.info(this));
-        s.put("rejected",p.getInt("rejected",0));s.put("message",p.getString("message","尚未开启定位记录"));
+        String statusMessage=p.getString("message","尚未开启定位记录");
+        if(statusMessage.contains("轨迹方案"))statusMessage="轨迹采用65米＋误差加权平滑 · 原始点保留";
+        s.put("rejected",p.getInt("rejected",0));s.put("message",statusMessage);
         s.put("batteryRestricted",!((android.os.PowerManager)getSystemService(POWER_SERVICE)).isIgnoringBatteryOptimizations(getPackageName()));return s;
     }
     private void startTrackingUI(){
@@ -138,7 +142,7 @@ public class MainActivity extends Activity {
     private void event(String name, Object data) { main.post(()->web.evaluateJavascript("window.nativeEvent("+JSONObject.quote(name)+","+data.toString()+")",null)); }
     private class Bridge {
         @JavascriptInterface public void call(String action,String input,String id) {
-            tasks.execute(()->{try{deliver(id,execute(action,new JSONObject(input)),null);}catch(Exception e){deliver(id,null,cleanError(e));}});
+            (action.equals("trackTile")?mapTasks:tasks).execute(()->{try{deliver(id,execute(action,new JSONObject(input)),null);}catch(Exception e){deliver(id,null,cleanError(e));}});
         }
     }
     private String cleanError(Exception e) {
@@ -150,15 +154,27 @@ public class MainActivity extends Activity {
     private Object execute(String action,JSONObject p) throws Exception {
         switch(action) {
             case "init": {
-                JSONObject o=new JSONObject();o.put("records",store.records());o.put("messages",store.messages());o.put("wikiPages",store.wikiPages());o.put("settings",publicSettings());return o;
+                JSONObject o=new JSONObject();o.put("records",store.records());JSONObject chat=ChatStore.get(store.getWritableDatabase(),this,null);o.put("messages",chat.getJSONArray("messages"));o.put("chatSession",chat.getJSONObject("session"));o.put("chatSessions",chat.getJSONArray("sessions"));o.put("wikiPages",store.wikiPages());o.put("settings",publicSettings());return o;
             }
+            case "getRecords": return store.records();
             case "saveWiki": return store.saveWiki(p.getJSONObject("page"));
+            case "getWikiJob": return store.wikiJob(p.getString("id"));
+            case "saveWikiJob": return store.saveWikiJob(p.getJSONObject("job"));
+            case "deleteWikiJob": return store.deleteWikiJob(p.getString("id"));
+            case "getWikiQueue": WikiAutomation.ensureBackfill(store.getWritableDatabase(),this);return store.wikiQueue();
+            case "ackWikiQueue": return store.ackWikiQueue(p.getJSONArray("jobs"));
+            case "saveWikiTopics": return store.assignTopics(p.getJSONArray("items"));
+            case "queueAllWiki": return store.backfillWiki();
+            case "saveWikiSettings": WikiAutomation.configure(this,p.getJSONObject("settings"));return publicSettings();
+            case "deleteWiki": store.getWritableDatabase().delete("wiki_pages","id=?",new String[]{p.getString("id")});return true;
+            case "applyRecordAction": return store.applyAction(p);
             case "trackDay": {JSONObject day=tracks.day(p.getString("date"));day.put("status",trackingStatus());day.put("dates",tracks.dates());return day;}
             case "trackStart": main.post(this::startTrackingUI);return true;
             case "trackStop": TrackingService.prefs(this).edit().putBoolean("enabled",false).putString("message","已暂停记录").apply();main.post(()->stopService(new Intent(this,TrackingService.class)));return true;
-            case "trackConfig": {SharedPreferences.Editor edit=TrackingService.prefs(this).edit();if(p.has("resumeAfterReboot"))edit.putBoolean("resumeAfterReboot",p.getBoolean("resumeAfterReboot"));if(p.has("mapConsent"))edit.putBoolean("mapConsent",p.getBoolean("mapConsent"));if(p.has("mapMode")){String mode=p.getString("mapMode");if(!mode.matches("online|offline"))throw new Exception("地图模式无效");if(mode.equals("online")&&!p.optBoolean("mapConsent"))throw new Exception("在线地图需先取得同意");edit.putString("mapMode",mode).putString("mapProvider","osm");}edit.apply();return trackingStatus();}
+            case "trackConfig": {SharedPreferences.Editor edit=TrackingService.prefs(this).edit();if(p.has("resumeAfterReboot"))edit.putBoolean("resumeAfterReboot",p.getBoolean("resumeAfterReboot"));if(p.has("mapConsent"))edit.putBoolean("mapConsent",p.getBoolean("mapConsent"));if(p.has("mapMode")){String mode=p.getString("mapMode");if(!mode.matches("online|offline"))throw new Exception("地图模式无效");if(mode.equals("online")&&!p.optBoolean("mapConsent"))throw new Exception("在线地图需先取得同意");edit.putString("mapMode",mode).putString("mapProvider","osm");}edit.apply();if(p.has("mapMode")||p.has("mapConsent"))MapTiles.cancelRequests();return trackingStatus();}
             case "trackDeleteDay": return tracks.deleteDay(p.getString("date"));
-            case "trackTile": return MapTiles.get(this,p.getInt("z"),p.getInt("x"),p.getInt("y"),privateSettings().optString("mapTileKey"),!TrackingService.prefs(this).getString("mapMode","offline").equals("online"));
+            case "trackMapView": return MapTiles.begin(this,p.getLong("view"),p.getString("mode"));
+            case "trackTile": {String mode=p.optString("mode",TrackingService.prefs(this).getString("mapMode","offline"));if(!mode.matches("online|offline"))throw new Exception("地图模式无效");return MapTiles.get(this,p.getInt("z"),p.getInt("x"),p.getInt("y"),privateSettings().optString("mapTileKey"),mode.equals("offline"),p.optLong("view",0));}
             case "trackImportMap": main.post(()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType("*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(intent,PICK_MAP);});return true;
             case "trackSaveMap": {
                 String provider=p.getString("provider");if(!provider.matches("osm|carto"))throw new Exception("地图厂商无效");String key=p.optString("key").trim();if(key.length()>500)throw new Exception("地图Key过长");
@@ -178,10 +194,19 @@ public class MainActivity extends Activity {
             case "trackLocationSettings": main.post(()->startActivity(new Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)));return true;
             case "trackBatterySettings": main.post(()->{try{startActivity(new Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}catch(Exception e){startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));}});return true;
             case "saveRecord": return store.save(p.getJSONObject("record"),p.optBoolean("allowDuplicate"));
-            case "deleteRecord": store.getWritableDatabase().delete("records","id=?",new String[]{p.getString("id")});return true;
+            case "deleteRecord": return store.deleteRecord(p.getString("id"));
             case "saveMessage": store.saveMessage(p.getJSONObject("message"));return true;
-            case "clearMessages": store.getWritableDatabase().delete("messages",null,null);return true;
+            case "getChat": return ChatStore.get(store.getWritableDatabase(),this,p.optString("sessionId"));
+            case "searchChats": return ChatStore.search(store.getReadableDatabase(),p.optString("query"));
+            case "newChat": return ChatStore.newSession(store.getWritableDatabase(),this);
+            case "deleteChat": return ChatStore.remove(store.getWritableDatabase(),this,p.getString("sessionId"),true);
+            case "saveChatMemory": return ChatStore.memory(store.getWritableDatabase(),p);
+            case "clearMessages": return ChatStore.remove(store.getWritableDatabase(),this,p.optString("sessionId",ChatStore.active(store.getWritableDatabase(),this)),false);
             case "getSettings": return publicSettings();
+            case "saveLearningGoal": {
+                int goal=p.getInt("minutes");if(goal<1||goal>1440)throw new Exception("每日学习目标应为1至1440分钟");
+                JSONObject settings=privateSettings();settings.put("dailyLearningGoal",goal);encryptSettings(settings);return publicSettings();
+            }
             case "saveLinkSettings": {
                 JSONObject settings=privateSettings(),incoming=p.getJSONObject("settings"),previous=settings.optJSONObject("linkSearch");
                 String provider=incoming.optString("provider",previous==null?"exa":previous.optString("provider","tavily"));if(!provider.matches("exa|tavily"))throw new Exception("搜索服务无效");
@@ -208,12 +233,12 @@ public class MainActivity extends Activity {
                 String endpoint=profile.getString("baseUrl").trim().replaceAll("/+$", "");
                 URL u=new URL(endpoint);if(!u.getProtocol().equals("https")&&!u.getProtocol().equals("http"))throw new Exception("API 地址必须使用 http 或 https");
                 if(u.getUserInfo()!=null)throw new Exception("请勿在地址中填写密钥");
-                if(u.getProtocol().equals("http")&&!profile.optBoolean("allowHttp"))throw new Exception("HTTP 地址需要开启可信内网连接");
+                ModelEndpoint.validate(u);profile.put("allowHttp",u.getProtocol().equals("http")&&ModelEndpoint.localHttp(u));profile.put("vision",true);
                 profile.put("baseUrl",endpoint);profiles.put(kind,profile);old.put("profiles",profiles);old.put("activeProfile",kind);
                 old.put("dailyLearningGoal",incoming.optInt("dailyLearningGoal",60));
                 encryptSettings(old);return publicSettings();
             }
-            case "ask": return ask(p);
+            case "ask": if(p.optBoolean("automaticWiki"))WikiAutomation.reserve(this);return ask(p);
             case "pick": {
                 pickKind=p.optString("kind","attachment");main.post(()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType("*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(intent,PICK);});return true;
             }
@@ -237,18 +262,19 @@ public class MainActivity extends Activity {
         }
     }
     private class Store extends SQLiteOpenHelper {
-        Store(){super(MainActivity.this,"quantlife.db",null,2);}
+        @Override public void onOpen(SQLiteDatabase db){super.onOpen(db);db.execSQL("CREATE TABLE IF NOT EXISTS wiki_jobs (id TEXT PRIMARY KEY,payload TEXT NOT NULL)");try{WorkLogMigration.run(db);}catch(Exception e){throw new android.database.sqlite.SQLiteException("工作日志迁移失败，原始内容保留",e);}}
+        Store(){super(MainActivity.this,"quantlife.db",null,4);}
         @Override public void onCreate(SQLiteDatabase db) {
             db.execSQL("CREATE TABLE records (id TEXT PRIMARY KEY,type TEXT NOT NULL,date TEXT NOT NULL,title TEXT NOT NULL,platform TEXT NOT NULL,payload TEXT NOT NULL)");
             db.execSQL("CREATE INDEX record_date ON records(date)");
             db.execSQL("CREATE TABLE messages (id TEXT PRIMARY KEY,created INTEGER NOT NULL,payload TEXT NOT NULL)");
-            db.execSQL("CREATE TABLE wiki_pages (id TEXT PRIMARY KEY,payload TEXT NOT NULL)");
+            db.execSQL("CREATE TABLE wiki_pages (id TEXT PRIMARY KEY,payload TEXT NOT NULL)");WikiAutomation.create(db);ChatStore.create(db);
         }
-        @Override public void onUpgrade(SQLiteDatabase db,int old,int next) {if(old<2&&next==2)db.execSQL("CREATE TABLE IF NOT EXISTS wiki_pages (id TEXT PRIMARY KEY,payload TEXT NOT NULL)");else throw new IllegalStateException("Unsupported schema migration");}
+        @Override public void onUpgrade(SQLiteDatabase db,int old,int next) {if(next!=4)throw new IllegalStateException("Unsupported schema migration");if(old<2)db.execSQL("CREATE TABLE IF NOT EXISTS wiki_pages (id TEXT PRIMARY KEY,payload TEXT NOT NULL)");if(old<3)WikiAutomation.create(db);if(old<4)ChatStore.create(db);}
         synchronized JSONArray wikiPages()throws Exception{JSONArray a=new JSONArray();try(Cursor c=getReadableDatabase().rawQuery("SELECT payload FROM wiki_pages ORDER BY rowid DESC",null)){while(c.moveToNext())a.put(new JSONObject(c.getString(0)));}return a;}
         synchronized JSONObject saveWiki(JSONObject page)throws Exception{
             String id=page.getString("id"),topic=page.getString("topic");if(id.isEmpty()||id.length()>160||topic.trim().isEmpty()||topic.length()>100||page.getString("summary").length()>12000||page.toString().length()>500000)throw new Exception("Wiki 知识页格式无效");
-            JSONArray ids=page.getJSONArray("sourceIds"),indexed=page.optJSONArray("indexSourceIds");if(indexed==null)indexed=ids;java.util.HashSet<String> valid=new java.util.HashSet<>();JSONObject versions=page.getJSONObject("sourceVersions");for(int i=0;i<indexed.length();i++){String source=indexed.getString(i);try(Cursor c=getReadableDatabase().rawQuery("SELECT payload FROM records WHERE id=? AND type='learning'",new String[]{source})){if(!c.moveToFirst()||new JSONObject(c.getString(0)).optLong("updatedAt")!=versions.getLong(source))throw new Exception("Wiki 来源已修改或删除，请重新整理");valid.add(source);}}
+            JSONArray ids=page.getJSONArray("sourceIds"),indexed=page.optJSONArray("indexSourceIds");if(indexed==null)indexed=ids;java.util.HashSet<String> valid=new java.util.HashSet<>();JSONObject versions=page.getJSONObject("sourceVersions");for(int i=0;i<indexed.length();i++){String source=indexed.getString(i);try(Cursor c=getReadableDatabase().rawQuery("SELECT payload FROM records WHERE id=? AND type IN ('learning','work','work_note','idea','experience')",new String[]{source})){if(!c.moveToFirst()||new JSONObject(c.getString(0)).optLong("updatedAt")!=versions.getLong(source))throw new Exception("Wiki 来源已修改或删除，请重新整理");valid.add(source);}}
             if(ids.length()==0)throw new Exception("Wiki 必须保留来源记录");java.util.HashSet<String> compiled=new java.util.HashSet<>();for(int i=0;i<ids.length();i++){if(!valid.contains(ids.getString(i)))throw new Exception("Wiki 来源无效");compiled.add(ids.getString(i));}JSONArray concepts=page.getJSONArray("concepts");for(int i=0;i<concepts.length();i++){JSONArray refs=concepts.getJSONObject(i).getJSONArray("sourceIds");if(refs.length()==0)throw new Exception("Wiki 概念缺少来源");for(int j=0;j<refs.length();j++)if(!compiled.contains(refs.getString(j)))throw new Exception("Wiki 概念引用不存在的记录");}
             android.content.ContentValues v=new android.content.ContentValues();v.put("id",id);v.put("payload",page.toString());if(getWritableDatabase().insertWithOnConflict("wiki_pages",null,v,SQLiteDatabase.CONFLICT_REPLACE)==-1)throw new Exception("Wiki 保存失败");return page;
         }
@@ -258,18 +284,28 @@ public class MainActivity extends Activity {
         synchronized boolean has(String id){try(Cursor c=getReadableDatabase().rawQuery("SELECT id FROM records WHERE id=?",new String[]{id})){return c.moveToFirst();}}
         synchronized boolean duplicate(JSONObject r)throws Exception {
             try(Cursor c=getReadableDatabase().rawQuery("SELECT payload FROM records WHERE type=? AND date=? AND id<>?",new String[]{r.getString("type"),r.getString("date"),r.getString("id")})){
-                while(c.moveToNext()){JSONObject other=new JSONObject(c.getString(0));if("work".equals(r.getString("type"))){if(r.optString("workStart").equals(other.optString("workStart")))return true;}else if(norm(r.optString("title")).equals(norm(other.optString("title")))&&norm(r.optString("platform")).equals(norm(other.optString("platform"))))return true;}
+                while(c.moveToNext()){JSONObject other=new JSONObject(c.getString(0));if("work".equals(r.getString("type"))){if(r.optString("workStart").equals(other.optString("workStart")))return true;}else if("work_note".equals(r.getString("type"))){if(r.optString("note").trim().equals(other.optString("note").trim()))return true;}else if(norm(r.optString("title")).equals(norm(other.optString("title")))&&norm(r.optString("platform")).equals(norm(other.optString("platform"))))return true;}
             }return false;
         }
-        synchronized JSONObject save(JSONObject r,boolean allow) throws Exception {
+        synchronized JSONObject save(JSONObject r,boolean allow) throws Exception {SQLiteDatabase db=getWritableDatabase();boolean own=!db.inTransaction();if(own)db.beginTransaction();try{JSONObject saved=saveImpl(r,allow);if(own)db.setTransactionSuccessful();return saved;}finally{if(own)db.endTransaction();}}
+        private JSONObject saveImpl(JSONObject r,boolean allow) throws Exception {
+            SQLiteDatabase db=getWritableDatabase();
             String id=r.getString("id"),type=r.getString("type"),date=r.getString("date"),title=r.getString("title").trim();
-            if(id.isEmpty()||id.length()>100||!type.matches("learning|work")||!date.matches("\\d{4}-\\d{2}-\\d{2}")||title.isEmpty()||title.length()>300)throw new Exception("记录格式无效");
+            if(id.isEmpty()||id.length()>100||!type.matches("learning|work|work_note|idea|experience")||!date.matches("\\d{4}-\\d{2}-\\d{2}")||title.isEmpty()||title.length()>300)throw new Exception("记录格式无效");
             parseLocal(date+"T00:00:00");
             for(String field:new String[]{"note","platform","url"}){if(r.has(field)&&!(r.get(field) instanceof String))throw new Exception("笔记、平台和链接必须是文本");if(!r.has(field))r.put(field,"");}
             if(!r.has("tags"))r.put("tags",new JSONArray());JSONArray tags=r.getJSONArray("tags");if(tags.length()>100)throw new Exception("标签过多");for(int i=0;i<tags.length();i++)if(!(tags.get(i) instanceof String))throw new Exception("标签格式无效");
             if(r.has("masteryLevel")&&!r.getString("masteryLevel").matches("unspecified|beginner|familiar|proficient"))throw new Exception("熟练度格式无效");if(r.has("evidenceType")&&!r.getString("evidenceType").matches("none|self|practice|tested"))throw new Exception("掌握证据类型无效");if(r.has("evidenceNote")&&(!(r.get("evidenceNote") instanceof String)||r.getString("evidenceNote").length()>5000))throw new Exception("掌握证据格式无效");
             double duration=r.optDouble("durationMinutes",0);if(!Double.isFinite(duration)||duration<0||duration>10080)throw new Exception("时长格式无效");
-            if(r.toString().length()>150000)throw new Exception("单条笔记内容过长");
+            if(type.equals("idea")||type.equals("experience")){
+                String occurred=r.getString("occurredAt");parseLocal(occurred);
+                if(!occurred.startsWith(date+"T")||r.getString("note").trim().isEmpty()||duration!=0)throw new Exception("灵感／经验须有内容和一致的发生时间，不记录时长");
+                if(!r.optString("masteryLevel","unspecified").equals("unspecified")||!r.optString("evidenceType","none").equals("none"))throw new Exception("灵感／经验不作为掌握程度证据");
+                r.put("durationMinutes",0);
+            }
+            if(type.equals("work_note")){if(r.getString("note").trim().isEmpty()||duration!=0||!r.optString("workStart").isEmpty()||!r.optString("workEnd").isEmpty())throw new Exception("工作日志须有内容，不能夹带工时或班次");if(!r.optString("occurredAt").isEmpty()){parseLocal(r.getString("occurredAt"));if(!r.getString("occurredAt").startsWith(date+"T"))throw new Exception("日志日期与发生时间不一致");}r.put("durationMinutes",0);}
+            if(r.has("wikiTopics")){JSONArray topicList=r.getJSONArray("wikiTopics");if(topicList.length()>3)throw new Exception("Wiki主题过多");for(int i=0;i<topicList.length();i++)if(!(topicList.get(i) instanceof String)||topicList.getString(i).trim().length()<2||topicList.getString(i).length()>60)throw new Exception("Wiki主题元信息无效");}
+
             if(!allow&&duplicate(r))throw new Exception("检测到相同日期、标题、平台的重复记录");
             if(type.equals("work")){
                 long start=parseLocal(r.optString("workStart")),end=r.optString("workEnd").isEmpty()?System.currentTimeMillis():parseLocal(r.optString("workEnd"));boolean ongoing=r.optString("workEnd").isEmpty();
@@ -278,12 +314,23 @@ public class MainActivity extends Activity {
                 for(int i=0;i<intervals.size();i++){JSONObject b=intervals.get(i);long bs=parseLocal(b.optString("start")),be=b.optString("end").isEmpty()?end:parseLocal(b.optString("end"));if(bs<start||bs<previous||be<bs||be>end||(b.optString("end").isEmpty()&&(!ongoing||i!=intervals.size()-1)))throw new Exception("休息段必须在班次内，且不能重叠");previous=be;}
                 try(Cursor c=getReadableDatabase().rawQuery("SELECT payload FROM records WHERE type='work' AND id<>?",new String[]{id})){while(c.moveToNext()){JSONObject other=new JSONObject(c.getString(0));long os=parseLocal(other.optString("workStart")),oe=other.optString("workEnd").isEmpty()?Long.MAX_VALUE:parseLocal(other.optString("workEnd"));long newEnd=ongoing?Long.MAX_VALUE:end;if(start<oe&&newEnd>os)throw new Exception("工作班次不能重叠，请调整时间");}}
             }
-            if(!r.has("createdAt"))r.put("createdAt",System.currentTimeMillis());r.put("updatedAt",System.currentTimeMillis());
+            JSONObject previous=record(id);if(!r.has("createdAt"))r.put("createdAt",System.currentTimeMillis());r.put("updatedAt",Math.max(System.currentTimeMillis(),previous==null?0:previous.optLong("updatedAt")+1));
             android.content.ContentValues values=new android.content.ContentValues();values.put("id",id);values.put("type",type);values.put("date",date);values.put("title",title);values.put("platform",r.optString("platform"));values.put("payload",r.toString());
-            if(getWritableDatabase().insertWithOnConflict("records",null,values,SQLiteDatabase.CONFLICT_REPLACE)==-1)throw new Exception("记录写入失败");return r;
+            if(getWritableDatabase().insertWithOnConflict("records",null,values,SQLiteDatabase.CONFLICT_REPLACE)==-1)throw new Exception("记录写入失败");invalidateWikiJobs(db,id);WikiAutomation.enqueue(getWritableDatabase(),id,r.getLong("updatedAt"),"upsert");WorkLogMigration.split(db,r);return r;
         }
-        synchronized JSONArray messages()throws Exception{JSONArray a=new JSONArray();try(Cursor c=getReadableDatabase().rawQuery("SELECT payload FROM (SELECT created,payload FROM messages ORDER BY created DESC LIMIT 100) ORDER BY created",null)){while(c.moveToNext())a.put(new JSONObject(c.getString(0)));}return a;}
-        synchronized void saveMessage(JSONObject m)throws Exception{android.content.ContentValues v=new android.content.ContentValues();v.put("id",m.getString("id"));v.put("created",m.getLong("createdAt"));v.put("payload",m.toString());getWritableDatabase().insertWithOnConflict("messages",null,v,SQLiteDatabase.CONFLICT_REPLACE);}
+        private JSONObject record(String id)throws Exception{try(Cursor c=getReadableDatabase().rawQuery("SELECT payload FROM records WHERE id=?",new String[]{id})){return c.moveToFirst()?new JSONObject(c.getString(0)):null;}}
+        private void invalidateWikiJobs(SQLiteDatabase db,String source)throws Exception{java.util.ArrayList<String> ids=new java.util.ArrayList<>();try(Cursor c=db.rawQuery("SELECT id,payload FROM wiki_jobs",null)){while(c.moveToNext()){JSONObject versions=new JSONObject(c.getString(1)).optJSONObject("versions");if(versions!=null&&versions.has(source))ids.add(c.getString(0));}}for(String id:ids)db.delete("wiki_jobs","id=?",new String[]{id});}
+        synchronized Object wikiJob(String id)throws Exception{try(Cursor c=getReadableDatabase().rawQuery("SELECT payload FROM wiki_jobs WHERE id=?",new String[]{id})){return c.moveToFirst()?new JSONObject(c.getString(0)):JSONObject.NULL;}}
+        synchronized JSONObject saveWikiJob(JSONObject job)throws Exception{SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{String id=job.getString("id");if(id.length()>200||!id.matches("(compile-|classify-).+"))throw new Exception("Wiki进度编号无效");JSONObject versions=job.getJSONObject("versions");java.util.Iterator<String> keys=versions.keys();while(keys.hasNext()){String key=keys.next();JSONObject r=record(key);if(r==null||r.optLong("updatedAt")!=versions.getLong(key))throw new Exception("Wiki来源已变化，将重新整理，旧进度未覆盖");}android.content.ContentValues v=new android.content.ContentValues();v.put("id",id);v.put("payload",job.toString());if(db.insertWithOnConflict("wiki_jobs",null,v,SQLiteDatabase.CONFLICT_REPLACE)==-1)throw new Exception("Wiki进度保存失败");db.setTransactionSuccessful();return job;}finally{db.endTransaction();}}
+        synchronized boolean deleteWikiJob(String id){getWritableDatabase().delete("wiki_jobs","id=?",new String[]{id});return true;}
+        synchronized JSONObject wikiQueue()throws Exception{return WikiAutomation.queue(getReadableDatabase(),MainActivity.this);}
+        synchronized int ackWikiQueue(JSONArray jobs)throws Exception{return WikiAutomation.acknowledge(getWritableDatabase(),jobs);}
+        synchronized JSONArray assignTopics(JSONArray items)throws Exception{return WikiAutomation.assign(getWritableDatabase(),items);}
+        synchronized int backfillWiki()throws Exception{return WikiAutomation.backfill(getWritableDatabase());}
+        synchronized boolean deleteRecord(String id)throws Exception{SQLiteDatabase db=getWritableDatabase();boolean own=!db.inTransaction();if(own)db.beginTransaction();try{JSONObject before=record(id);if(before!=null){db.delete("records","id=?",new String[]{id});invalidateWikiJobs(db,id);WikiAutomation.enqueue(db,id,Math.max(System.currentTimeMillis(),before.optLong("updatedAt")+1),"delete");}if(own)db.setTransactionSuccessful();return true;}finally{if(own)db.endTransaction();}}
+        synchronized Object applyAction(JSONObject action)throws Exception{SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{String id=action.getString("recordId"),kind=action.getString("kind");JSONObject current=record(id);if(current==null||current.optLong("updatedAt")!=action.getLong("expectedVersion"))throw new Exception("记录已被修改或删除，请重新检索并确认，未覆盖新数据");Object result;if(kind.equals("delete"))result=deleteRecord(id);else if(kind.equals("update")){JSONObject incoming=action.getJSONObject("record");if(!id.equals(incoming.getString("id"))||!current.getString("type").equals(incoming.getString("type")))throw new Exception("更新不能更换记录编号或类型");for(String k:new String[]{"title","date","platform","contentType","tags","note","url","durationMinutes","occurredAt","workStart","workEnd","breaks"})if(incoming.has(k))current.put(k,incoming.get(k));result=save(current,false);}else throw new Exception("不允许的记录操作");db.setTransactionSuccessful();return result;}finally{db.endTransaction();}}
+        synchronized JSONArray messages()throws Exception{return ChatStore.messages(getReadableDatabase(),null);}
+        synchronized void saveMessage(JSONObject m)throws Exception{ChatStore.message(getWritableDatabase(),MainActivity.this,m);}
     }
     private static String norm(String x){return java.text.Normalizer.normalize(x,java.text.Normalizer.Form.NFKC).toLowerCase(Locale.ROOT).replaceAll("[\\s\\p{P}\\p{S}]", "");}
     private static long parseLocal(String x)throws Exception{if(!x.matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"))throw new Exception("时间格式无效");SimpleDateFormat f=new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss",Locale.US);f.setLenient(false);ParsePosition p=new ParsePosition(0);Date d=f.parse(x,p);if(d==null||p.getIndex()!=x.length())throw new Exception("时间格式无效");return d.getTime();}
@@ -297,14 +344,14 @@ public class MainActivity extends Activity {
         String[] parts=encrypted.split(":");Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Base64.decode(parts[0],Base64.NO_WRAP)));return new JSONObject(new String(c.doFinal(Base64.decode(parts[1],Base64.NO_WRAP)),StandardCharsets.UTF_8));
     }
     private void encryptSettings(JSONObject s)throws Exception{Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,key());String encrypted=Base64.encodeToString(c.getIV(),Base64.NO_WRAP)+":"+Base64.encodeToString(c.doFinal(s.toString().getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP);if(!getSharedPreferences("secure",MODE_PRIVATE).edit().putString("settings",encrypted).commit())throw new Exception("设置保存失败");}
-    private JSONObject publicSettings()throws Exception{JSONObject s=privateSettings();s.remove("mapTileKey");JSONObject search=LinkReader.searchSettings(s.optJSONObject("linkSearch"));search.put("keyConfigured",!search.optString("apiKey").isEmpty());search.remove("apiKey");s.put("linkSearch",search);JSONObject profiles=s.optJSONObject("profiles");if(profiles!=null){java.util.Iterator<String> it=profiles.keys();while(it.hasNext()){JSONObject p=profiles.getJSONObject(it.next());p.put("keyConfigured",!p.optString("apiKey").isEmpty());p.remove("apiKey");}}return s;}
+    private JSONObject publicSettings()throws Exception{JSONObject s=privateSettings();s.put("wikiAutomation",WikiAutomation.settings(this));s.remove("mapTileKey");JSONObject search=LinkReader.searchSettings(s.optJSONObject("linkSearch"));search.put("keyConfigured",!search.optString("apiKey").isEmpty());search.remove("apiKey");s.put("linkSearch",search);JSONObject profiles=s.optJSONObject("profiles");if(profiles!=null){java.util.Iterator<String> it=profiles.keys();while(it.hasNext()){JSONObject p=profiles.getJSONObject(it.next());p.put("keyConfigured",!p.optString("apiKey").isEmpty());p.remove("apiKey");}}return s;}
 
     private JSONObject ask(JSONObject p) throws Exception {
         JSONObject settings=privateSettings(),profiles=settings.optJSONObject("profiles");String active=settings.optString("activeProfile");
-        JSONObject profile=profiles==null?null:profiles.optJSONObject(active);if(profile==null||profile.optString("apiKey").isEmpty())throw new Exception("请先在「设置」中配置模型和 API Key");
+        JSONObject profile=profiles==null?null:profiles.optJSONObject(active);if(profile==null||profile.optString("apiKey").isEmpty())throw new Exception("请先在历史侧栏的「模型配置」中填写 API Key");
         String endpoint=profile.getString("baseUrl"),protocol=profile.optString("protocol","chat");
         URL url=new URL(endpoint+(protocol.equals("responses")?"/responses":"/chat/completions"));
-        if(url.getProtocol().equals("http")&&!profile.optBoolean("allowHttp"))throw new Exception("请在设置中允许可信内网 HTTP 连接");
+        ModelEndpoint.validate(url);
         JSONArray chat=p.getJSONArray("messages");JSONObject body=new JSONObject();body.put("model",profile.getString("model"));body.put("stream",false);
         JSONObject tool=p.optJSONObject("tool");
         String effort=profile.optString("effort","off");
@@ -315,12 +362,13 @@ public class MainActivity extends Activity {
                 if(content instanceof JSONArray){JSONArray items=new JSONArray();JSONArray parts=(JSONArray)content;for(int j=0;j<parts.length();j++){JSONObject part=parts.getJSONObject(j),item=new JSONObject();if(part.getString("type").equals("text")){item.put("type","input_text");item.put("text",part.getString("text"));}else{item.put("type","input_image");item.put("image_url",part.getJSONObject("image_url").getString("url"));}items.put(item);}out.put("content",items);}else out.put("content",content);input.put(out);
             }body.put("instructions",instruction);body.put("input",input);body.put("store",false);body.put("max_output_tokens",4096);
             if(!effort.equals("off")){JSONObject reasoning=new JSONObject();reasoning.put("effort",effort);body.put("reasoning",reasoning);}
-            if(tool!=null){JSONObject t=new JSONObject(tool.toString());t.put("type","function");body.put("tools",new JSONArray().put(t));body.put("tool_choice","auto");}
+            if(tool!=null){JSONObject t=new JSONObject(tool.toString());t.put("type","function");body.put("tools",new JSONArray().put(t));body.put("tool_choice",profile.optString("id").equals("deepseek")&&effort.equals("off")?new JSONObject().put("type","function").put("name",tool.getString("name")):"auto");}
         } else {
             body.put("messages",chat);body.put("max_tokens",4096);
-            if(tool!=null){JSONObject t=new JSONObject();t.put("type","function");t.put("function",tool);body.put("tools",new JSONArray().put(t));body.put("tool_choice","auto");}
+            if(tool!=null){JSONObject t=new JSONObject();t.put("type","function");t.put("function",tool);body.put("tools",new JSONArray().put(t));body.put("tool_choice",profile.optString("id").equals("deepseek")&&effort.equals("off")?new JSONObject().put("type","function").put("function",new JSONObject().put("name",tool.getString("name"))):"auto");}
             if(profile.optString("id").equals("glm")){JSONObject thinking=new JSONObject();thinking.put("type",effort.equals("off")?"disabled":"enabled");body.put("thinking",thinking);}
-            else if(!effort.equals("off")&&!profile.optString("id").equals("deepseek"))body.put("reasoning_effort",effort);
+            else if(profile.optString("id").equals("deepseek")){body.put("thinking",new JSONObject().put("type",effort.equals("off")?"disabled":"enabled"));if(!effort.equals("off"))body.put("reasoning_effort",effort);}
+            else if(!effort.equals("off"))body.put("reasoning_effort",effort);
         }
         HttpURLConnection conn=(HttpURLConnection)url.openConnection();conn.setConnectTimeout(20000);conn.setReadTimeout(120000);conn.setInstanceFollowRedirects(false);conn.setRequestMethod("POST");conn.setDoOutput(true);conn.setRequestProperty("Content-Type","application/json; charset=utf-8");conn.setRequestProperty("Authorization","Bearer "+profile.getString("apiKey"));
         try {
@@ -335,7 +383,7 @@ public class MainActivity extends Activity {
             if(protocol.equals("responses")){JSONArray outputs=response.optJSONArray("output");if(outputs!=null)for(int i=0;i<outputs.length();i++){JSONObject output=outputs.getJSONObject(i);if("function_call".equals(output.optString("type"))&&(tool==null?"prepare_life_records":tool.optString("name")).equals(output.optString("name"))){answer.setLength(0);answer.append(output.getString("arguments"));break;}JSONArray parts=output.optJSONArray("content");if(parts!=null)for(int j=0;j<parts.length();j++)if("output_text".equals(parts.getJSONObject(j).optString("type")))answer.append(parts.getJSONObject(j).optString("text"));}}
             else{JSONArray choices=response.optJSONArray("choices");if(choices!=null&&choices.length()>0){JSONObject message=choices.getJSONObject(0).getJSONObject("message");JSONArray calls=message.optJSONArray("tool_calls");if(calls!=null){for(int i=0;i<calls.length();i++){JSONObject function=calls.getJSONObject(i).getJSONObject("function");if((tool==null?"prepare_life_records":tool.optString("name")).equals(function.optString("name"))){answer.append(function.getString("arguments"));break;}}}if(answer.length()==0)answer.append(message.optString("content", ""));}}
             if(answer.length()==0)throw new Exception("模型未返回文本，请切换非推理模型或提高输出额度");
-            JSONObject result=new JSONObject();result.put("text",answer.toString());result.put("model",profile.getString("model"));return result;
+            JSONObject result=new JSONObject();result.put("text",answer.toString());result.put("model",profile.getString("model"));if(response.has("usage"))result.put("usage",response.get("usage"));return result;
         }finally{conn.disconnect();}
     }
     private static byte[] readBytes(InputStream input,int max)throws Exception{try(InputStream in=input;ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1){if(out.size()+n>max)throw new Exception("文件超过大小限制");out.write(buffer,0,n);}return out.toByteArray();}}
