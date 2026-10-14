@@ -55,9 +55,16 @@ public class WorkLayoutTest extends WorkCalendarWikiTest {
   click("[data-work-day]");jsCheck("!document.querySelector('#work-month-calendar').open","Choosing a day closes calendar and keeps logs in reach");
   Thread.sleep(300);h.screenshot("work-compact-empty-1.7.7.png");
   click("[data-action=add-work-note]");jsCheck("document.querySelector('#work-note-date').value===document.querySelector('[data-work-day][aria-pressed=true]').dataset.workDay","Write-log date follows selected calendar date");click("#close-editor");
-  click("[data-record-tab=learning]");jsCheck("document.querySelector('[data-action=record-tools]')!==null&&document.querySelector('[data-action=user-guide]')!==null","Backup and manual are accessible outside work tab");
-  click("[data-action=record-tools]");jsCheck("document.querySelector('#record-export')!==null&&document.querySelector('#record-import')!==null","Native backup entry opens correctly");click("#close-editor");
-  click("[data-record-tab=work]");click("[data-range=today]");Thread.sleep(300);h.screenshot("work-compact-logs-1.7.7.png");
+  click("[data-record-tab=learning]");jsCheck("!document.querySelector('.records-tools')&&!document.querySelector('[data-action=quick-add]')&&document.querySelector('[data-action=add-learning]')!==null","Learning has no toolbar and retains its own add button");
+  Thread.sleep(300);h.screenshot("learning-clean-1.7.8.png");
+  click("[data-action=add-learning]");jsCheck("document.querySelector('#record-form')!==null","Learning editor opens without global toolbar");click("#close-editor");
+  click("[data-record-tab=thoughts]");jsCheck("!document.querySelector('.records-tools')&&!document.querySelector('[data-action=quick-add]')&&document.querySelector('[data-action=add-idea]')!==null&&document.querySelector('[data-action=add-experience]')!==null","Thoughts have no toolbar and retain idea/experience entry points");
+  Thread.sleep(300);h.screenshot("thoughts-clean-1.7.8.png");
+  click("[data-action=add-idea]");jsCheck("document.querySelector('#thought-form')!==null","Idea editor still opens");click("#close-editor");
+  click("[data-page=chat]");click("[data-action=chat-tools]");click("#chat-user-guide");until("document.querySelector('.user-guide')!==null");jsCheck("document.querySelectorAll('.user-guide details').length===14","Offline guide opens from chat more menu");click("#close-editor");
+  click("[data-action=chat-tools]");click("#chat-record-tools");
+  jsCheck("document.querySelector('#record-export')!==null&&document.querySelector('#record-import')!==null","Native backup entry opens correctly");click("#close-editor");
+  click("[data-page=records]");click("[data-record-tab=work]");click("[data-range=today]");Thread.sleep(300);h.screenshot("work-compact-logs-1.7.8.png");
  }
  @Override public void onStart(){Bundle result=new Bundle();try{
   h=new MainHost(this);h.open();holdAutomation();

@@ -14,7 +14,7 @@ test('offline guide covers each user workflow and important limitations', () => 
 test('bundled guide has no executable or external resources', () => {
   assert.doesNotMatch(guide, /<script|<iframe|<img|<link|on\w+\s*=|(?:src|href)\s*=/i);
   assert.ok(read('app/src/main/assets/app.js').includes("fetch('user-guide.html')"));
-  assert.ok(read('app/src/main/assets/app.js').includes('data-action="user-guide"'));
+  assert.ok(read('app/src/main/assets/chat-ui.js').includes('data-action="user-guide"'));
 });
 test('repository manual contains the same guidance as the in-app guide', () => {
   const manual = read('docs/用户使用说明.md');
@@ -25,8 +25,8 @@ test('screenshot policy permits system capture without adding capture permission
   assert.doesNotMatch(read('app/src/main/AndroidManifest.xml'), /READ_MEDIA_IMAGES|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|CAPTURE_VIDEO_OUTPUT/);
 });
 test('version identifiers agree for the new signed upgrade', () => {
-  assert.equal(JSON.parse(read('package.json')).version, '1.7.7');
-  assert.equal(JSON.parse(read('package-lock.json')).packages[''].version, '1.7.7');
-  assert.match(read('app/build.gradle'), /versionCode 26/);
-  assert.match(read('tools/build.ps1'), /'--version-code','26','--version-name','1.7.7'/);
+  assert.equal(JSON.parse(read('package.json')).version, '1.7.8');
+  assert.equal(JSON.parse(read('package-lock.json')).packages[''].version, '1.7.8');
+  assert.match(read('app/build.gradle'), /versionCode 27/);
+  assert.match(read('tools/build.ps1'), /'--version-code','27','--version-name','1.7.8'/);
 });
