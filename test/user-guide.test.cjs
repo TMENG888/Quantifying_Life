@@ -25,8 +25,8 @@ test('screenshot policy permits system capture without adding capture permission
   assert.doesNotMatch(read('app/src/main/AndroidManifest.xml'), /READ_MEDIA_IMAGES|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|CAPTURE_VIDEO_OUTPUT/);
 });
 test('version identifiers agree for the new signed upgrade', () => {
-  assert.equal(JSON.parse(read('package.json')).version, '1.7.6');
-  assert.equal(JSON.parse(read('package-lock.json')).packages[''].version, '1.7.6');
-  assert.match(read('app/build.gradle'), /versionCode 25/);
-  assert.match(read('tools/build.ps1'), /'--version-code','25','--version-name','1.7.6'/);
+  assert.equal(JSON.parse(read('package.json')).version, '1.7.7');
+  assert.equal(JSON.parse(read('package-lock.json')).packages[''].version, '1.7.7');
+  assert.match(read('app/build.gradle'), /versionCode 26/);
+  assert.match(read('tools/build.ps1'), /'--version-code','26','--version-name','1.7.7'/);
 });

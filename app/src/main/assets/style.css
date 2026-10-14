@@ -104,23 +104,68 @@ dialog.chat-drawer[open]{display:flex;flex-direction:column;animation:drawer-in 
 @keyframes drawer-in{from{transform:translateX(-100%)}to{transform:translateX(0)}}
 @media(prefers-reduced-motion:reduce){dialog.chat-drawer[open]{animation:none}}
 @media(max-width:360px){.chat-toolbar{padding:5px 8px}.chat-welcome h2{font-size:18px}.chat-mode .message-content{font-size:15px}.chat-mode .composer{margin:0 9px;padding:10px 10px 7px}.chat-model-name{font-size:9px}.drawer-top{padding-left:12px}}
-/* Work: bounded calendar and selected-day tabs; never stack an entire month of shifts. */
-.work-dashboard .page-title{font-size:28px;margin-bottom:14px}
-.work-clock-bar{display:flex;align-items:center;gap:8px;padding:12px;background:#eef3ec;border-radius:16px;min-width:0}
+/* Work: compact content-first layout; date selection lives in the calendar. */
+.work-mode main{padding:10px 18px 24px}
+.work-mode .record-tabs{margin:0 0 14px;padding:4px;border-radius:16px}
+.work-mode .record-tabs button{padding:10px 6px;font-size:13px;min-height:44px;border-radius:12px}
+.work-dashboard{min-width:0}
+.work-clock-bar{display:flex;align-items:center;gap:0;padding:16px;background:#eaf1e8;border:1px solid #e1eadd;border-radius:18px;margin-bottom:14px;min-width:0}
 .work-clock-bar>.muted,.work-current{flex:1;min-width:0}
-.work-current{background:none;border:0;text-align:left;color:#216a54;padding:0}
-.work-current span{display:block;font-size:12px}.work-current strong{display:block;font-size:22px;margin-top:4px}
-.work-clock-bar button{white-space:nowrap}.work-clock-bar .primary,.work-clock-bar .secondary{padding:10px 12px;font-size:13px}
-.work-overview{display:grid;grid-template-columns:1.2fr 1fr .7fr;gap:8px;padding:16px 0}
-.work-overview span{display:block;font-size:12px;color:#69766c}.work-overview strong{display:block;margin-top:6px;font-size:20px;color:#216a54}.work-overview small{font-size:12px;font-weight:400}
-.work-calendar.panel{padding:12px;margin-bottom:12px}.work-calendar-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.work-calendar-head .text-button{padding:5px 14px;font-size:22px}
+.work-clock-bar>.muted{font-size:13px}
+.work-current{background:none;border:0;text-align:left;color:var(--green);padding:0}
+.work-current span{display:block;font-size:12px;line-height:1.6}
+.work-current strong{display:block;font-size:24px;line-height:1.2;letter-spacing:-.5px;margin-top:5px;font-variant-numeric:tabular-nums}
+.work-clock-bar .primary,.work-clock-bar .secondary{flex-shrink:0;white-space:nowrap;padding:10px 12px;font-size:13px}
+.work-clock-bar .secondary{background:#ffffff88}
+.work-period-tabs{display:flex;border-bottom:1px solid var(--line);margin:0 0 14px}
+.work-period-tabs button+button{margin-left:22px}
+.work-period-tabs button{position:relative;padding:8px 2px 12px;min-height:44px;font-size:13px;color:var(--muted);background:transparent}
+.work-period-tabs button.active{color:var(--green);font-weight:600}
+.work-period-tabs button.active:after{content:'';position:absolute;height:3px;border-radius:3px;background:var(--green);left:2px;right:2px;bottom:-1px}
+.work-calendar.panel{padding:12px;margin:0}
+.work-calendar-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:13px}
+.work-calendar-head .text-button{min-width:44px;min-height:44px;font-size:22px}
 .work-calendar-grid,.work-weekdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
-.work-weekdays span{text-align:center;color:#7c877d;font-size:11px;padding:4px 0}
-.work-date{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:55px;border:1px solid transparent;border-radius:10px;background:transparent;color:#394b40;padding:4px 0;min-width:0}
-.work-date span{font-size:13px}.work-date small{font-size:10px;margin-top:3px;color:#738477}.work-date i{display:block;width:4px;height:4px;margin-top:4px;border-radius:50%;background:transparent}.work-date i.has-logs{background:#216a54}
-.work-date.is-today{border-color:#b5cdbc}.work-date.selected{background:#216a54;color:white}.work-date.selected small{color:#e4eee8}.work-date.selected i.has-logs{background:white}
-.work-day-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:12px 0}.work-day-heading input{max-width:155px;font-size:13px;padding:8px}.work-day-heading>span{font-size:12px;color:#69766c}
-.work-view-tabs{display:flex;padding:4px;background:#edf0e9;border-radius:12px;gap:4px}.work-view-tabs button{flex:1;min-width:0;padding:10px 5px;border:0;background:transparent;color:#68776b;font-size:12px;border-radius:9px}.work-view-tabs button.active{background:white;color:#216a54;font-weight:600;box-shadow:0 1px 5px #173c2310}
-.work-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:12px 0}.work-pagination span{font-size:12px;color:#69766c}.work-pagination button{padding:8px 12px;font-size:12px}.work-pagination button:disabled{opacity:.4}
-.work-calendar-disclosure{margin:8px 0 12px;border:1px solid #e1e9df;border-radius:12px;background:white}.work-calendar-disclosure>summary{display:flex;justify-content:space-between;align-items:center;gap:8px;list-style:none;padding:12px;font-size:12px;color:#216a54;cursor:pointer}.work-calendar-disclosure>summary::-webkit-details-marker{display:none}.work-calendar-disclosure .panel{margin:0;border:0;box-shadow:none}
-.work-mode .records-tools{margin:4px 0 8px;gap:8px}.work-mode .records-tools button{font-size:11px;padding:5px 0}.work-mode .record-tabs{margin:8px 0 12px;padding:3px}.work-mode .record-tabs button{padding:9px 6px;font-size:12px}.work-dashboard .page-title{font-size:20px;margin:4px 0 10px}.work-clock-bar{padding:10px}.work-overview{padding:12px 0}.work-overview strong{font-size:18px}.work-dashboard .chip-row{margin:8px 0 12px}.work-dashboard .section-title{margin:14px 0 10px}.work-dashboard #work-note-search{padding:10px 12px}
+.work-weekdays span{text-align:center;color:var(--muted);font-size:11px;padding:4px 0}
+.work-date{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:58px;border:1px solid transparent;border-radius:12px;background:transparent;color:var(--ink);padding:5px 0;min-width:0}
+.work-date span{font-size:14px;font-weight:600;line-height:1.5}
+.work-date small{font-size:10px;color:var(--muted);line-height:1.5}
+.work-date i{display:block;width:4px;height:4px;margin-top:3px;border-radius:50%;background:transparent}
+.work-date i.has-logs{background:var(--green)}
+.work-date.is-today{border-color:#b5cdbc}
+.work-date.selected{background:var(--green);color:white}
+.work-date.selected small{color:#e4eee8}
+.work-date.selected i.has-logs{background:white}
+.work-week-strip{margin:0 0 14px}
+.work-view-tabs{display:flex;gap:0;padding:4px;background:#e9eee6;border-radius:13px}
+.work-view-tabs button{flex:1;min-width:0;min-height:44px;padding:9px 12px;border:0;background:transparent;color:var(--muted);font-size:14px;border-radius:10px}
+.work-view-tabs button.active{background:white;color:var(--green);font-weight:600;box-shadow:0 2px 5px #173c2309}
+.work-dashboard .section-title{margin:14px 0 8px}
+.work-list-heading h2{font-size:14px;font-weight:550;line-height:1.5;overflow-wrap:anywhere}
+.work-list-heading .text-button{min-height:44px;flex-shrink:0;padding:8px 0 8px 12px;font-size:13px}
+.work-search{display:flex;align-items:center;padding:0 12px;background:#ebece6;border:1px solid transparent;border-radius:12px;margin-bottom:12px}
+.work-search svg{margin-right:8px}
+.work-search svg{width:18px;height:18px;flex-shrink:0;color:#839086}
+.work-search #work-note-search{background:transparent;border:0;outline:none;box-shadow:none;min-width:0;min-height:44px;padding:10px 0;font-size:14px}
+.work-search:focus-within{border-color:#92b4a7;background:white}
+.work-search input::placeholder{color:#839086}
+.work-day-list.panel{padding:0 14px;margin:0;border:1px solid #e7ece3;border-radius:16px}
+.work-day-list .record{padding:16px 0;gap:0}
+.work-day-list .record-main{margin-left:12px}
+.work-clock-bar>.secondary,.work-clock-bar>.primary{margin-left:8px}
+.work-view-tabs button+button{margin-left:4px}
+.work-day-list .record-note{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal;overflow:hidden;line-height:1.65;overflow-wrap:anywhere}
+.work-day-list .record-main strong{font-size:14px}
+.work-day-list .record-icon.work{background:var(--soft);color:var(--green)}
+.work-empty{padding:30px 10px;min-height:155px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.work-empty-icon{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:var(--soft);color:#8aa28e;font-size:23px}
+.work-empty strong{font-size:14px;font-weight:500;margin:9px 0 0;color:var(--muted)}
+.work-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:12px 0}
+.work-pagination span{font-size:12px;color:var(--muted)}
+.work-pagination button{padding:8px 12px;font-size:12px}
+.work-pagination button:disabled{opacity:.4}
+.work-calendar-disclosure{margin:0 0 14px;border:1px solid #e1e9df;border-radius:12px;background:white}
+.work-calendar-disclosure>summary{display:flex;justify-content:space-between;align-items:center;gap:8px;list-style:none;padding:12px;font-size:12px;color:var(--green);min-height:44px;cursor:pointer}
+.work-calendar-disclosure>summary::-webkit-details-marker{display:none}
+.work-calendar-disclosure .panel{border:0;box-shadow:none}
+@media(max-width:360px){.work-mode main{padding-left:12px;padding-right:12px}.work-clock-bar{padding:12px;gap:6px}.work-current strong{font-size:21px}.work-clock-bar .primary,.work-clock-bar .secondary{padding:9px 10px;font-size:12px}.work-mode .record-tabs button{font-size:12px}.work-list-heading h2{font-size:13px}}
