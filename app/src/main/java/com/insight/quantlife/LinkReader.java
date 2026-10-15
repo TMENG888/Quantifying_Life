@@ -64,7 +64,7 @@ public final class LinkReader {
                 if(page.code!=200){result.put("directStatus","http_"+page.code);throw new Exception("网页暂不可读（HTTP "+page.code+"）");}
                 if(!page.mime.toLowerCase(Locale.ROOT).matches(".*(text/html|application/xhtml\\+xml).*"))throw new Exception("此链接不是可读取的网页；文件请作为附件发送");
                 JSONObject meta=parse(decode(page.bytes,page.mime),url.toString());
-                if(meta.optString("title").isEmpty()||challenge(meta.optString("title"))){result.put("directStatus","verification_or_missing_title");throw new Exception("网页缺少可靠标题或需要登录／验证");}
+                if(!usableTitle(meta.optString("title"),meta.optString("platform"))){result.put("directStatus","verification_or_missing_title");throw new Exception("网页缺少可靠标题或需要登录／验证");}
                 for(String k:new String[]{"title","platform","author","contentType","description","excerpt"})result.put(k,meta.optString(k));
                 result.put("finalUrl",url.toString());
                 return result.put("status","metadata").put("directStatus","ok").put("readMethod","direct").put("contentStatus",result.optString("excerpt").length()>=80?"limited_text":"metadata_only").put("message","已读取网页元信息及有限文本；不保证全文，未观看视频或读取书籍全文");
@@ -79,19 +79,24 @@ public final class LinkReader {
         if(provider.equals("tavily")&&effective.optString("apiKey").isEmpty())return result.put("searchStatus","not_configured").put("message","网页读取失败；Tavily未配置Key，可在设置中改用免Key的Exa匿名MCP，或补充标题／截图");
         try{
             if(provider.equals("exa")&&exa!=null)try{
-                JSONObject fetched=exa.fetch(requested.toString(),overall);if(!challenge(fetched.optString("title"))){JSONObject types=parse("",requested.toString());return result.put("status","metadata").put("title",fetched.getString("title")).put("excerpt",fetched.getString("excerpt")).put("description","").put("contentType",types.optString("contentType","other")).put("finalUrl",fetched.getString("url")).put("readMethod","exa_fetch").put("contentStatus","limited_text").put("textTruncated",fetched.optBoolean("textTruncated")).put("fetchStatus","ok").put("message","通过Exa读取了同链接的有限正文；不保证全文／实时，不将其当作个人笔记");}
+                JSONObject fetched=exa.fetch(requested.toString(),overall);if(usableTitle(fetched.optString("title"),result.optString("platform"))){JSONObject types=parse("",requested.toString());return result.put("status","metadata").put("title",fetched.getString("title")).put("excerpt",fetched.getString("excerpt")).put("description","").put("contentType",types.optString("contentType","other")).put("finalUrl",fetched.getString("url")).put("readMethod","exa_fetch").put("contentStatus","limited_text").put("textTruncated",fetched.optBoolean("textTruncated")).put("fetchStatus","ok").put("message","通过Exa读取了同链接的有限正文；不保证全文／实时，不将其当作个人笔记");}
             }catch(ExaMcp.Failure e){result.put("fetchStatus",e.status);if(e.status.matches("rate_limited|authentication_required"))throw e;}
             // Never search an anti-bot redirect carrying temporary access parameters.
             JSONObject response=provider.equals("exa")?exa.search(requested.toString(),overall):search.search(searchRequest(url.toString()),effective.getString("apiKey"));
             JSONArray results=searchResults(response);result.put("searchResults",results);
             for(int i=0;i<results.length();i++){JSONObject hit=results.getJSONObject(i);if(samePage(input,hit.getString("url"))||samePage(url.toString(),hit.getString("url"))){
-                if(hit.optString("title").isEmpty()||challenge(hit.optString("title")))continue;
+                if(!usableTitle(hit.optString("title"),platform(new URL(hit.getString("url")).getHost())))continue;
                 return result.put("title",hit.getString("title")).put("description",hit.optString("snippet")).put("platform",platform(new URL(hit.getString("url")).getHost())).put("contentType",parse("",hit.getString("url")).optString("contentType","other")).put("status","search_match").put("readMethod","search").put("contentStatus","metadata_only").put("searchStatus","matched").put("message","来自"+(provider.equals("exa")?"Exa匿名MCP":"Tavily")+"的同一链接搜索摘要，未读取正文；请核对标题和类型");
             }}
             result.put("searchStatus","no_exact_match").put("message","网页读取失败；搜索未找到同一链接的可靠标题，请补充标题或截图");
         }catch(ExaMcp.Failure e){String msg=e.status.equals("rate_limited")?"Exa匿名搜索已限流，请两分钟后重试或手动补充标题／截图；不会自动切换到收费服务":e.status.equals("timeout")?"Exa匿名搜索超时，请检查网络或手动补充标题／截图":e.status.equals("authentication_required")?"Exa匿名入口当前要求认证；本应用不会自动登录或使用Key，请手动补充标题／截图":e.status.equals("protocol_error")?"Exa搜索协议或结果格式发生变化，请稍后重试或补充标题／截图":"Exa匿名搜索暂不可用，请检查网络或补充标题／截图";result.put("searchStatus",e.status).put("message",msg);}
         catch(Exception e){result.put("searchStatus","failed").put("message",provider.equals("exa")?"Exa匿名搜索暂不可用，请检查网络或补充标题／截图":"网页读取失败，Tavily搜索亦不可用，请检查搜索Key、额度或网络，或补充标题／截图");}
         return result;
+    }
+    public static boolean usableTitle(String title,String platform){
+        String key=java.text.Normalizer.normalize(title==null?"":title,java.text.Normalizer.Form.NFKC).toLowerCase(Locale.ROOT).replaceAll("[\\s\\p{P}\\p{S}]","");
+        String p=java.text.Normalizer.normalize(platform==null?"":platform,java.text.Normalizer.Form.NFKC).toLowerCase(Locale.ROOT).replaceAll("[\\s\\p{P}\\p{S}]","");
+        return !key.isEmpty()&&!key.equals(p)&&!key.matches("视频号|微信视频号|视频号视频|微信|微信公众号|公众号|抖音|b站|哔哩哔哩|bilibili|youtube|小红书|知乎|视频|文章|课程|书籍|学习记录|首页|首页视频号|登录|用户登录|login|signin|打开app|在app中打开")&&!challenge(title);
     }
     private static boolean challenge(String s){return s.matches("(?is).*(just a moment|access denied|attention required|访问受限|安全检查|环境异常|完成验证|captcha).*")||s.matches("(?is)\\s*(登录|验证|login|sign in|用户登录|安全验证).*");}
     public static String platform(String h){h=h.toLowerCase(Locale.ROOT);String[][] names={{"mp.weixin.qq.com","微信公众号"},{"weixin.qq.com","微信视频号"},{"bilibili.com","B站"},{"b23.tv","B站"},{"zhihu.com","知乎"},{"youtube.com","YouTube"},{"youtu.be","YouTube"},{"douyin.com","抖音"},{"douban.com","豆瓣"},{"csdn.net","CSDN"},{"juejin.cn","掘金"},{"xiaohongshu.com","小红书"}};for(String[] n:names)if(h.equals(n[0])||h.endsWith("."+n[0]))return n[1];return h;}

@@ -6,7 +6,23 @@
   const normalizeText = s => String(s || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]/gu,'');
   const isThought = r => ['idea','experience'].includes(r?.type);
   const thoughtTitle = note => String(note||'').trim().split(/[\n。！？!?]/)[0].slice(0,60).trim() || '未命名记录';
-  const missingLearningTitle = title => !String(title||'').trim() || /未获取到|未识别|待补.*标题|未命名|待确认标题|无法获取.*标题/.test(String(title));
+  const genericLearningTitle = (title,platform='') => {const key=normalizeText(title);return !key||!!platform&&key===normalizeText(platform)||['视频号','微信视频号','视频号视频','微信','微信公众号','公众号','抖音','b站','哔哩哔哩','bilibili','youtube','小红书','知乎','视频','文章','课程','书籍','学习记录','首页','首页视频号','登录','用户登录','login','signin','打开app','在app中打开'].includes(key);};
+  const missingLearningTitle = title => genericLearningTitle(title) || /未获取到|未识别|待补.*标题|未命名|待确认标题|无法获取.*标题/.test(String(title));
+  // Strip independent tracking metadata, never minutes inside knowledge or quotations.
+  function splitLearningInput(input){
+    const text=String(input||''),parts=text.split(/([，,。；;\n])/),found=[];
+    const number='(?:\\d+(?:\\.\\d+)?|[零一二两三四五六七八九十百]+|半)';
+    const amount='('+number+')\\s*(?:个?小时|hours?|h)(?:\\s*('+number+')\\s*(?:分钟|分|minutes?|mins?))?|('+number+')\\s*(?:分钟|分|minutes?|mins?)';
+    const pattern=new RegExp('^(?:(?:我)?(?:今天|刚刚|刚才)?(?:学习时长|学习时间|本次学习用时|本次用时)\\s*[:：为是]?\\s*|(?:我)?(?:今天|刚刚|刚才)?(?:学习了|学了|学习|学|看了|阅读了|读了|用时|花了)\\s*)('+amount+')(?:左右)?[。.!！]?$', 'i');
+    const value=s=>{if(!s)return 0;if(s==='半')return .5;if(/^\d/.test(s))return Number(s);const digits={'零':0,'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9};let n=0,a=0;for(const c of s){if(c==='百'||c==='十'){n+=(a||1)*(c==='百'?100:10);a=0;}else a=digits[c];}return n+a;};
+    const nonempty=[];for(let i=0;i<parts.length;i+=2)if(parts[i].trim())nonempty.push(i);
+    for(const i of nonempty){const clause=parts[i].trim(),m=clause.match(pattern);if(!m)continue;if(i!==nonempty[0]&&i!==nonempty.at(-1)&&!/^学习时长|^学习时间|^本次学习用时|^本次用时/.test(clause))continue;const minutes=m[4]?value(m[4]):value(m[2])*60+value(m[3]);if(minutes>=0&&minutes<=10080)found.push({i,minutes});}
+    if(!found.length||new Set(found.map(x=>x.minutes)).size>1)return {noteText:text,durationMinutes:null};
+    const starts=[];let offset=0;for(const part of parts){starts.push(offset);offset+=part.length;}
+    const ranges=found.map(({i})=>({start:i===nonempty[0]?0:starts[i]-parts[i-1].length,end:i===nonempty.at(-1)?text.length:starts[i]+parts[i].length+(i===nonempty[0]?parts[i+1].length:0)}));
+    let note='',cursor=0;for(const range of ranges){note+=text.slice(cursor,Math.max(cursor,range.start));cursor=Math.max(cursor,range.end);}note+=text.slice(cursor);
+    return {noteText:note.trim(),durationMinutes:found[0].minutes};
+  }
   function learningTitle(note){const text=String(note||'').replace(/^(?:我)?(?:今天|刚刚|刚才)?(?:学习|阅读|看|读)(?:了)?(?:这个|这篇|这段)?(?:视频|文章|内容)?(?:内容)?[，,：:\s]*(?:有关|关于)?/,'').trim(),parts=text.split(/[\n。！？!?，,；;]/).map(s=>s.replace(/^(?:为最近的一个|这是一个|为一个|是一个|有关|关于)/,'').trim()).filter(Boolean);let title='';for(const part of parts.slice(0,3)){if(title.length+part.length+3>40)break;title+=(title?' · ':'')+part;}return title||(parts[0]?parts[0].slice(0,39)+(parts[0].length>39?'…':''):'学习笔记');}
   function validLocalTime(s){return typeof s==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(s)&&Number.isFinite(Date.parse(s))&&localTime(new Date(s))===s;}
   function validate(r,now=Date.now()) {
@@ -118,6 +134,7 @@
     if (!Array.isArray(items) || items.length>30) throw Error('AI 返回的记录列表格式无效');
     return items.flatMap(x=> {
       const r={id:uid(),type:x.type,date:x.date,title:String(x.title||'').slice(0,300),platform:String(x.platform||'').slice(0,100),contentType:['article','video','course','book','other'].includes(x.contentType)?x.contentType:'article',tags:Array.isArray(x.tags)?x.tags.slice(0,20).map(String):[],note:String(x.note||''),url:String(x.url||''),durationMinutes:Number(x.durationMinutes||0),workStart:x.workStart||'',workEnd:x.workEnd||'',breaks:Array.isArray(x.breaks)?x.breaks:[],source:'ai',status:'completed'};
+      if(r.type==='learning'){const fields=splitLearningInput(r.note);if(fields.durationMinutes!==null){r.note=fields.noteText;r.durationMinutes=fields.durationMinutes;}}
       if(r.type==='learning'&&missingLearningTitle(r.title)&&r.note.trim()){r.title=learningTitle(r.note);r.titleOrigin='note';}else if(r.type==='learning'&&['note','web','user'].includes(x.titleOrigin))r.titleOrigin=x.titleOrigin;
       r.masteryLevel=x.masteryLevel||'unspecified';r.evidenceType=x.evidenceType||'none';r.evidenceNote=String(x.evidenceNote||'').slice(0,5000);
       if(r.type==='work_note'){r.occurredAt=String(x.occurredAt||'');if(r.occurredAt.length===16)r.occurredAt+=':00';r.title=r.title.trim()||thoughtTitle(r.note);r.durationMinutes=0;r.workStart=r.workEnd='';r.breaks=[];r.masteryLevel='unspecified';r.evidenceType='none';r.evidenceNote='';}
@@ -133,6 +150,6 @@
     if(typeof result.answer!=='string') throw Error('模型回复格式不正确');
     return {answer:result.answer,records:allowRecords?aiRecords(result.records||[]):[],citations:Array.isArray(result.citations)?result.citations.map(String):[]};
   }
-  const api={localDate,localTime,uid,validate,workMinutes,workMinutesOnDate,workMinutesInRange,questionPeriod,localContext,duplicate,similar,retrieval,aiRecords,parseAI,normalizeText,isThought,thoughtTitle,learningTitle,missingLearningTitle,validLocalTime};
+  const api={localDate,localTime,uid,validate,workMinutes,workMinutesOnDate,workMinutesInRange,questionPeriod,localContext,duplicate,similar,retrieval,aiRecords,parseAI,normalizeText,isThought,thoughtTitle,learningTitle,missingLearningTitle,genericLearningTitle,splitLearningInput,validLocalTime};
   if(typeof module==='object'&&module.exports)module.exports=api; else root.LifeDomain=api;
 })(typeof window!=='undefined'?window:globalThis);
