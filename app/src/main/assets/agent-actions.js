@@ -39,7 +39,19 @@
   if(typeof time!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(time)||!Number.isFinite(Date.parse(time))||D.localTime(new Date(time))!==time)throw Error('打卡时间无效，请使用明确的本地日期时间');
   if(Date.parse(time)>now.getTime())throw Error('不能提前记录尚未发生的打卡，请核对时间');return time;
  }
- function prepare(items,records,allowedIds,now=new Date()){
+ function learningTimeRequest(text){
+  const s=String(text||'').trim();if(/[?？]|不(?:是|要|用|修改)|没(?:有|学)|明天|准备|计划|如果|打算/.test(s)||!/(刚刚|刚才|刚记录|刚保存|这条|这个|那条|那个|这篇|那篇)/.test(s)||!/(学习|学了|学|时长|分钟|小时)/.test(s))return null;
+  const times=[...s.matchAll(/(\d+(?:\.\d+)?)\s*(分钟|小时)|半(?:个)?小时/g)];if(times.length!==1)return null;const m=times[0],minutes=m[0].includes('半')?30:Number(m[1])*(m[2]==='小时'?60:1);if(minutes<0||minutes>10080)return null;
+  const rest=s.replace(m[0],'').replace(/(?:而且|请|帮我|把|将|我|刚刚|刚才|刚记录|刚保存|的|这条|这个|那条|那个|这篇|那篇|学习记录|记录|视频|文章|学习|学了|学|了|时长|改为|改成|更新为|设为|补充为|补充|总共|一共|总时长|增加|再|又|多|[，,。！!：:\s])/g,'');if(rest)return null;return {minutes,add:/增加|再|又|多/.test(s)};
+ }
+ function learningTarget(messages,records,text=''){
+  for(let i=messages.length-1;i>=0;i--){const m=messages[i];if(m.role!=='assistant')continue;let event=m.recordEvent;if(!event&&String(m.contextText||'').startsWith('应用实际执行回执（用户确认后成功执行）：')){try{event=JSON.parse(m.contextText.slice('应用实际执行回执（用户确认后成功执行）：'.length));}catch{}}
+   if(event){if(event.kind!=='saved')return null;const r=records.find(r=>r.id===event.recordId);if(!r||r.type!=='learning'||(/视频/.test(text)&&r.contentType!=='video')||(/文章/.test(text)&&r.contentType!=='article'))return null;return r;}
+   if(String(m.contextText||'').includes('待确认候选（尚未入库'))return null;
+  }return null;
+ }
+ function diff(before,after){return Object.fromEntries(fields.filter(k=>JSON.stringify(before[k])!==JSON.stringify(after[k])).map(k=>[k,after[k]]));}
+ function prepare(items,records,allowedIds,now=new Date(),options={}){
   if(!Array.isArray(items)||items.length>10)throw Error('变更操作列表无效');const seen=new Set();let starting=false;
   return items.flatMap(a=>{
    if(!a||!['update_record','delete_record','start_work','start_break','end_break','end_work','create_work_note'].includes(a.kind))throw Error('不支持的AI操作');
@@ -49,7 +61,11 @@
    const before=clone(r);if(a.kind==='delete_record')return {kind:a.kind,before,after:null};
    if(a.patch!==undefined&&(!a.patch||typeof a.patch!=='object'||Array.isArray(a.patch)))throw Error('AI试图更改不允许的字段');const after=clone(r),patch={...(a.patch||{})},logs=[];if(r.type==='work'&&a.kind==='update_record'){const content=[patch.note,a.appendNote].filter(v=>v!==undefined);for(const v of content){if(typeof v!=='string')throw Error('日志内容无效');if(v.trim())logs.push(logAction(v,patch.date||r.date,now));}delete patch.note;a={...a,appendNote:undefined};if(!Object.keys(patch).length&&logs.length)return logs;}if(typeof patch!=='object'||Array.isArray(patch)||Object.keys(patch).some(k=>!fields.includes(k)))throw Error('AI试图更改不允许的字段');
    if(a.kind==='update_record'){
-    for(const [k,v] of Object.entries(patch))after[k]=v;
+    const timeOnly=r.type==='learning'&&learningTimeRequest(options.text),keepOthers=r.type==='learning'&&/时长/.test(options.text||'')&&/(?:笔记|其他信息).{0,8}不变|只(?:改|修改|更新|更正).{0,12}时长/.test(options.text||'');
+    if(keepOthers&&!timeOnly){for(const k of Object.keys(patch))if(k!=='durationMinutes')delete patch[k];a={...a,appendNote:undefined};}
+    if(timeOnly){for(const k of Object.keys(patch))if(k!=='durationMinutes')delete patch[k];patch.durationMinutes=timeOnly.add?Number(r.durationMinutes||0)+timeOnly.minutes:timeOnly.minutes;a={...a,appendNote:undefined};}
+    if(r.type==='learning'&&options.text){if(!/时长|分钟|小时/.test(options.text))delete patch.durationMinutes;if(patch.title!==undefined&&D.missingLearningTitle(patch.title))delete patch.title;}
+    for(const [k,v] of Object.entries(patch)){if((v===null||v===''||Array.isArray(v)&&!v.length)&&['note','title','url','tags','platform','contentType'].includes(k)&&(/(?:不要|别|不必|无需).{0,12}(?:清空|删除|移除)/.test(options.text||'')||!new RegExp('(?:清空|删除|移除)(?:这条|该|记录的|我的|全部|所有|的|\\s)*(?:'+({note:'笔记|内容',title:'标题',url:'链接',tags:'标签',platform:'平台',contentType:'类型'}[k])+')').test(options.text||''))){delete patch[k];continue;}after[k]=v;}
     if(a.appendNote!==undefined){if(typeof a.appendNote!=='string'||!a.appendNote.trim())throw Error('追加内容无效');after.note=[after.note||'',a.appendNote.trim()].filter(Boolean).join('\n\n');}
     if(!Object.keys(patch).length&&!a.appendNote&&!logs.length)throw Error('请说明要更正或追加什么内容');
    }else{
@@ -72,8 +88,8 @@
  function bind(){document.querySelectorAll('[data-confirm-change]').forEach(b=>b.onclick=()=>e.safe(()=>apply(Number(b.dataset.confirmChange))));document.querySelectorAll('[data-drop-change]').forEach(b=>b.onclick=()=>{e.state.changes.splice(Number(b.dataset.dropChange),1);e.render();});}
  async function apply(i){const a=e.state.changes[i];if(!a)return;if(a.kind==='delete_record'&&!await e.confirm('确认删除「'+a.before.title+'」？','只删除这条记录；已整理的相关Wiki会失效，随后自动更新。','删除'))return;
   if(['start_work','create_work_note'].includes(a.kind))await e.save(a.after);else{
-   const result=await e.api('applyRecordAction',{kind:a.kind==='delete_record'?'delete':'update',recordId:a.before.id,expectedVersion:a.before.updatedAt||0,record:a.after});e.state.records=e.state.records.filter(r=>r.id!==a.before.id);if(a.after)e.state.records.unshift(result);
+   const result=await e.api('applyRecordAction',{kind:a.kind==='delete_record'?'delete':'update',recordId:a.before.id,expectedVersion:a.before.updatedAt||0,patch:a.after?diff(a.before,a.after):undefined,clearFields:a.after?fields.filter(k=>a.before[k]&&((a.after[k]===''||a.after[k]===null)||(Array.isArray(a.after[k])&&!a.after[k].length))):[]});e.state.records=e.state.records.filter(r=>r.id!==a.before.id);if(a.after)e.state.records.unshift(result);
   }if(!['start_work','create_work_note'].includes(a.kind)&&e.outcome)await e.outcome(a.kind==='delete_record'?'deleted':'saved',a.after||a.before);e.state.changes.splice(i,1);e.render();e.toast('操作已应用到本地记录');e.kickWiki();
  }
- const api={schema,fields,prepare,workDraft,clockRequest,clockActions,init:env=>{e=env;},card,bind};if(node)module.exports=api;else root.LifeAgent=api;
+ const api={schema,fields,prepare,diff,learningTimeRequest,learningTarget,workDraft,clockRequest,clockActions,init:env=>{e=env;},card,bind};if(node)module.exports=api;else root.LifeAgent=api;
 })(typeof window!=='undefined'?window:globalThis);

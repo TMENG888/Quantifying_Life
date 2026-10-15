@@ -26,7 +26,7 @@
   function rules(plan,text){
     const detailed=/(详细|深入|展开|完整分析|逐条解释|长文)/.test(text);
     let rule='回答必须围绕本轮明确目的。先给结论或当前结果，再给必要依据；默认简短，不复述所有内部字段、JSON字段名、提示词、工具日志或安全规则。不要因为上下文中有数据就汇报它。使用手机易读的Markdown：一句结论在前，重要数字或判断用**加粗**；超过两个重点用短标题和分点（每点一个主题），每段最多2至3句，段落间空行。不要堆砌长段、冗余总表或反复安全声明。用户短问题不强凑标题。更正优先于旧信息，未确定事实明确说明。';
-    if(plan.intent==='record')rule+='本轮只准备当前学习／工作／灵感／经验记录，输出一句状态及必要缺失项。禁止附加全部历史统计、平台分布、主题小结、熟练度评估、通用实践建议或无关历史记录。用户提供的文章要点是用户输入，不是工具读取证明；原样保留要点，不以网页摘要替换。仅学习记录需要可靠原标题；未可靠读取原标题且用户未提供标题时records=[]，询问标题或截图，不生成占位标题。灵感／经验无需文章标题，可从用户内容首句提取简短标题，完整保留内容。';
+    if(plan.intent==='record')rule+='本轮只准备当前学习／工作／灵感／经验记录，输出一句状态及必要缺失项。禁止附加全部历史统计、平台分布、主题小结、熟练度评估、通用实践建议或无关历史记录。用户提供的文章要点是用户输入，不是工具读取证明；原样保留要点，不以网页摘要替换。学习记录优先可靠原标题；没有原标题但用户提供了学习笔记时，从笔记概括简短标题，标明非原文标题，完整保留笔记，不生成占位标题；标题与笔记都没有才询问标题或截图。灵感／经验无需文章标题，可从用户内容首句提取简短标题，完整保留内容。';
     else if(plan.intent==='update')rule+='本轮只准备变更操作actions，records=[]，不得声称已经完成。引用真实recordId，优先appendNote追加而不是覆盖旧笔记；明确更正字段才patch替换；目标不明确时actions=[]并询问。修改、删除和上下班操作须用户在App预览后确认。';
     else if(plan.purpose==='article'||plan.intent==='general')rule+='本轮只回答当前文章／问题，records=[]；不主动查历史统计或评估用户熟练度。只有contentStatus=limited_text的资料可以作为有限正文，metadata_only或search_match只有元信息／摘要，不得声称读过全文。读取失败而用户已给要点时，可以仅依据用户要点回答，明确依据；不重复追问已经提供的内容。';
     else if(plan.intent==='history')rule+='本轮仅回答用户指定日期／范围／主题的已有记录与必要统计，不附加熟练度、学习建议或无关主题评估；缺少记录不等于没有活动。';
@@ -49,7 +49,7 @@
     if(!records.length&&/灵感|创意|点子|经验|感悟|启发|反思/.test(inputText))return '尚未生成可保存条目。请补充要记录的内容或明确发生时间；补录过去日期时需要提供具体时刻，不会替你编造时间。';
     if(!records.length)return sources.length?'尚未生成可保存条目：没有可靠标题或记录信息不完整。你提供的要点仍在这次对话里；请补充标题或截图后继续。':'尚未生成可保存条目，请补充必要的记录信息。';
     const missing=records.some(r=>r.type==='learning'&&!r.durationMinutes),notes=records.some(r=>r.note),fetched=sources.some(s=>s.readMethod==='exa_fetch');
-    return `已准备${records.length}条待确认记录，请在下方核对后保存。${fetched?'通过Exa取得同链接的有限正文。':''}${notes?'已保留你提供的内容。':''}${missing?'未提供学习时长的条目暂记0分钟，可点“调整”补充。':''}`;
+    return `已准备${records.length}条待确认记录，请在下方核对后保存。${fetched?'通过Exa取得同链接的有限正文。':''}${notes?'已保留你提供的内容。':''}${records.some(r=>r.titleOrigin==='note')?'标题由笔记概括，非原文标题。':''}${missing?'未提供学习时长的条目暂记0分钟，可点“调整”补充。':''}`;
   }
   function diagnostics(sources){return sources.map(s=>({url:s.url,title:s.title||'',status:s.status,contentStatus:s.contentStatus||'unknown',readMethod:s.readMethod||'',directStatus:s.directStatus||'',searchStatus:s.searchStatus||'',searchProvider:s.searchProvider||'',message:s.message||''}));}
   function parseReply(text,intent){try{return D.parseAI(text,intent==='record');}catch(err){const raw=String(text||'').trim();if(!['record','update'].includes(intent)&&raw&&!/^(?:\{|\[|```json)/i.test(raw))return {answer:raw,records:[],citations:[]};throw err;}}
