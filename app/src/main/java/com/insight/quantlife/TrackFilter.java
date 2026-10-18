@@ -10,16 +10,17 @@ public final class TrackFilter {
     public static final double MAX_SPEED=100,MAX_ACCURACY=35;
     public static final class Point {
         public long id,time; public double lat,lon,accuracy,reportedAccuracy=Double.NaN,reportedSpeed=Double.NaN,speed=Double.NaN,speedAccuracy=Double.NaN;
-        public String session="",provider="gps"; public boolean mocked,filtered,breakBefore;
+        public String session="",provider="gps",sourceProvider="gps",motionState="unknown"; public boolean mocked,filtered,breakBefore,eligible=true;
+        public double motionRms=Double.NaN;public long motionAgeMs=-1,gpsAgeMs=-1;
         public int satellitesUsed=-1;public double meanCn0=Double.NaN;public long gnssAgeMs=-1;
-        public Point copy(){Point p=new Point();p.id=id;p.time=time;p.lat=lat;p.lon=lon;p.accuracy=accuracy;p.reportedAccuracy=reportedAccuracy;p.reportedSpeed=reportedSpeed;p.speed=speed;p.speedAccuracy=speedAccuracy;p.session=session;p.provider=provider;p.mocked=mocked;p.filtered=filtered;p.breakBefore=breakBefore;p.satellitesUsed=satellitesUsed;p.meanCn0=meanCn0;p.gnssAgeMs=gnssAgeMs;return p;}
+        public Point copy(){Point p=new Point();p.id=id;p.time=time;p.lat=lat;p.lon=lon;p.accuracy=accuracy;p.reportedAccuracy=reportedAccuracy;p.reportedSpeed=reportedSpeed;p.speed=speed;p.speedAccuracy=speedAccuracy;p.session=session;p.provider=provider;p.mocked=mocked;p.filtered=filtered;p.breakBefore=breakBefore;p.satellitesUsed=satellitesUsed;p.meanCn0=meanCn0;p.gnssAgeMs=gnssAgeMs;p.eligible=eligible;p.sourceProvider=sourceProvider;p.motionState=motionState;p.motionRms=motionRms;p.motionAgeMs=motionAgeMs;p.gpsAgeMs=gpsAgeMs;return p;}
         public boolean reliableSpeed(){return "gps".equals(provider)&&Double.isFinite(speed)&&speed>=0&&speed<=MAX_SPEED&&Double.isFinite(speedAccuracy)&&speedAccuracy>=0&&speedAccuracy<=0.6;}
     }
     public static boolean valid(Point p){return valid(p,MAX_ACCURACY,0);}
     // signalMode: 0 legacy; 1 zero used satellites is unknown; 2 GNSS telemetry is advisory only.
     public static boolean valid(Point p,double maxAccuracy,int signalMode){
         if(!Double.isFinite(maxAccuracy)||maxAccuracy<=0||maxAccuracy>100||signalMode<0||signalMode>2)return false;
-        if(p==null||!Double.isFinite(p.lat)||!Double.isFinite(p.lon)||Math.abs(p.lat)>90||Math.abs(p.lon)>180||p.time<=0||!Double.isFinite(p.accuracy)||p.accuracy<=0||p.accuracy>maxAccuracy||p.session==null||p.session.isEmpty()||!"gps".equals(p.provider))return false;
+        if(p==null||!p.eligible||!Double.isFinite(p.lat)||!Double.isFinite(p.lon)||Math.abs(p.lat)>90||Math.abs(p.lon)>180||p.time<=0||!Double.isFinite(p.accuracy)||p.accuracy<=0||p.accuracy>maxAccuracy||p.session==null||p.session.isEmpty()||!"gps".equals(p.provider))return false;
         if(signalMode==2||signalMode==1&&p.satellitesUsed==0)return true;
         return !(p.gnssAgeMs>=0&&p.gnssAgeMs<=15000&&(p.satellitesUsed>=0&&p.satellitesUsed<4||Double.isFinite(p.meanCn0)&&p.meanCn0<20));
     }

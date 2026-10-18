@@ -21,13 +21,14 @@ public class MapViewportTest extends Instrumentation {
                 ByteArrayOutputStream out=new ByteArrayOutputStream();bitmap.compress(Bitmap.CompressFormat.PNG,100,out);bitmap.recycle();db.execSQL("INSERT INTO tiles VALUES(?,?,?,?)",new Object[]{14,x(14)+dx,(1<<14)-1-y(14)-dy,out.toByteArray()});
             }
         }
-        OfflineMap.importFile(getTargetContext(),Uri.fromFile(source));h.call("trackConfig",new JSONObject().put("mapMode","offline").put("mapConsent",false));
+        OfflineMap.importFile(getTargetContext(),Uri.fromFile(source));h.call("trackConfig",new JSONObject().put("mapMode","offline").put("mapConsent",false).put("filterMode","weighted65"));
         try(TrackStore db=new TrackStore(getTargetContext())){db.deleteDay(date);long base=TrackStore.dayStart(date)+12*3600000;for(int i=0;i<=30;i++){Location p=BeforeGapFixTest.p(base+i*5000,i*7,1.4f);db.add(p,"map-fixture");}
             JSONObject snapshot=new JSONObject().put("init",h.call("init",new JSONObject())).put("raw",db.diagnostics(date).getJSONArray("rawPoints")).put("gpx",db.gpx(date));try(FileOutputStream f=getTargetContext().openFileOutput("map-upgrade-fixture.json",0)){f.write(snapshot.toString().getBytes("UTF-8"));}}
     }
     void openMap()throws Exception{h.js("document.querySelector('[data-page=tracks]').click()");check(h.waitText("每天走过的地方"),"Track page opens");h.js("document.querySelector('#track-date').value='2026-10-23';document.querySelector('#track-date').dispatchEvent(new Event('change'))");Thread.sleep(1200);}
     @Override public void onStart(){Bundle out=new Bundle();try{
         h=new MainHost(this);h.open();
+        if(phase.equals("current")){h.js("AutoWiki.pause()");fixture();verify();out.putString("stream","PASS "+passed+" current-version map regression checks; synthetic tiles only\n");finish(Activity.RESULT_OK,out);return;}
         if(phase.equals("live")){
             try {h.call("trackConfig",new JSONObject().put("mapMode","online").put("mapConsent",true));JSONObject tile=(JSONObject)h.call("trackTile",new JSONObject().put("z",0).put("x",0).put("y",0).put("mode","online"));check(tile.getString("data").startsWith("data:image/png;base64,"),"LIVE public OSM world tile loads through real native network path");out.putString("stream","PASS single public z0 world tile, no personal coordinates or keys\n");}
             catch(Exception e){Throwable reason=e instanceof java.lang.reflect.InvocationTargetException?((java.lang.reflect.InvocationTargetException)e).getTargetException():e;out.putString("stream","LIMIT real map network unavailable: "+reason.getMessage()+"; offline/controlled tests are separate\n");}
@@ -63,7 +64,7 @@ public class MapViewportTest extends Instrumentation {
         boolean stopped;DummyConnection()throws Exception{super(new java.net.URL("https://example.invalid/"));}public void connect(){}public boolean usingProxy(){return false;}public void disconnect(){stopped=true;}
     }
     void verify()throws Exception{
-        check(getTargetContext().getPackageManager().getPackageInfo(getTargetContext().getPackageName(),0).versionName.equals("1.4.7"),"New 1.4.7 installed");
+        if(!phase.equals("current"))check(getTargetContext().getPackageManager().getPackageInfo(getTargetContext().getPackageName(),0).versionName.equals("1.4.7"),"New 1.4.7 installed");
         StringBuilder text=new StringBuilder();try(BufferedReader reader=new BufferedReader(new InputStreamReader(getTargetContext().openFileInput("map-upgrade-fixture.json"),"UTF-8"))){String line;while((line=reader.readLine())!=null)text.append(line);}JSONObject snapshot=new JSONObject(text.toString());
         JSONObject init=(JSONObject)h.call("init",new JSONObject());for(String key:new String[]{"records","wikiPages","messages","settings"})check(init.get(key).toString().equals(snapshot.getJSONObject("init").get(key).toString()),"Upgrade retains "+key);
         try(TrackStore db=new TrackStore(getTargetContext())){check(db.diagnostics(date).getJSONArray("rawPoints").toString().equals(snapshot.getJSONArray("raw").toString()),"Raw positions preserved");check(db.gpx(date).equals(snapshot.getString("gpx")),"D coordinates and GPX exactly preserved");check(db.day(date).getJSONObject("filter").getString("id").equals("weighted65"),"Sole D unchanged");}
@@ -109,6 +110,6 @@ public class MapViewportTest extends Instrumentation {
         boolean oldMode=false;try{h.call("trackTile",new JSONObject().put("z",0).put("x",0).put("y",0).put("mode","online"));}catch(Exception e){oldMode=true;}check(oldMode,"Explicit stale online mode cannot fetch after revocation");
         try(TrackStore db=new TrackStore(getTargetContext())){check(db.gpx(date).equals(snapshot.getString("gpx")),"Map interactions never alter D GPX");check(db.diagnostics(date).getJSONArray("rawPoints").toString().equals(snapshot.getJSONArray("raw").toString()),"Map interactions never change raw data");}
         check(!((JSONObject)h.call("init",new JSONObject())).has("points"),"Locations still excluded from AI init");
-        h.js("document.querySelector('[data-page=settings]').click();document.querySelector('[data-action=user-guide]').click()");check(h.waitText("第一次使用"),"Offline guide opens");h.js("Array.from(document.querySelectorAll('.user-guide details')).find(d=>d.querySelector('summary').innerText.includes('全天轨迹')).open=true");check(h.waitText("低清放大"),"Help explains coarse map and privacy limits");
+        h.js("document.querySelector('[data-page=chat]').click();document.querySelector('[data-action=chat-tools]').click();document.querySelector('[data-action=user-guide]').click()");check(h.waitText("第一次使用"),"Offline guide opens");h.js("Array.from(document.querySelectorAll('.user-guide details')).find(d=>d.querySelector('summary').innerText.includes('全天轨迹')).open=true");check(h.waitText("低清放大"),"Help explains coarse map and privacy limits");
     }
 }

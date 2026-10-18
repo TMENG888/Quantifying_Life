@@ -54,7 +54,7 @@ public final class MapTiles {
             String endpoint=carto?"https://basemaps.cartocdn.com/light_all/"+z+"/"+x+"/"+y+".png?key="+java.net.URLEncoder.encode(cartoKey,"UTF-8"):"https://tile.openstreetmap.org/"+z+"/"+x+"/"+y+".png";
             HttpURLConnection connection=(HttpURLConnection)new URL(endpoint).openConnection();
             connection.setConnectTimeout(5000);connection.setReadTimeout(8000);connection.setInstanceFollowRedirects(false);
-            connection.setRequestProperty("User-Agent","Zhishi/1.4.7 (Android personal trajectory viewer)");
+            connection.setRequestProperty("User-Agent","Zhishi/1.9.0 (Android personal trajectory viewer)");
             if(carto){connection.setRequestProperty("X-Android-Package",context.getPackageName());try{android.content.pm.PackageInfo info=context.getPackageManager().getPackageInfo(context.getPackageName(),android.content.pm.PackageManager.GET_SIGNATURES);byte[] cert=java.security.MessageDigest.getInstance("SHA-256").digest(info.signatures[0].toByteArray());StringBuilder fingerprint=new StringBuilder();for(byte v:cert)fingerprint.append(String.format(java.util.Locale.US,"%02X",v&255));connection.setRequestProperty("X-Android-Cert",fingerprint.toString());}catch(Exception ignored){}}
             synchronized(LOCK){check(context,false,view);active.put(connection,view);}
             try {

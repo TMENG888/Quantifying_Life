@@ -12,7 +12,7 @@ import java.util.regex.*;
 import java.util.zip.GZIPInputStream;
 import javax.net.ssl.*;
 
-/** Read-only, bounded public-page metadata. No WebView, cookies, JS or model credentials. */
+/** Read-only bounded public-page metadata. Optional tools use isolated credentials. */
 public final class LinkReader {
     private static final int LIMIT=512*1024;
     public static final class Page {
@@ -21,14 +21,15 @@ public final class LinkReader {
     }
     public interface Transport {Page get(URL url,long deadline)throws Exception;}
     public interface SearchTransport {JSONObject search(JSONObject request,String key)throws Exception;}
-    private final Transport transport; private final SearchTransport search; private final ExaMcp exa;
+    private final Transport transport; private final SearchTransport search; private final ExaMcp exa; private final DeepSeekTools deepseek;
     public LinkReader(){this(LinkReader::getPage,LinkReader::searchTavily,new ExaMcp());}
     public LinkReader(Transport t,SearchTransport s){this(t,s,null);}
-    public LinkReader(Transport t,SearchTransport s,ExaMcp e){transport=t;search=s;exa=e;}
+    public LinkReader(Transport t,SearchTransport s,ExaMcp e){this(t,s,e,new DeepSeekTools());}
+    public LinkReader(Transport t,SearchTransport s,ExaMcp e,DeepSeekTools d){transport=t;search=s;exa=e;deepseek=d;}
     public static JSONObject searchSettings(JSONObject stored)throws Exception {
         if(stored==null)return new JSONObject().put("provider","exa").put("enabled",true).put("apiKey","");
         JSONObject s=new JSONObject(stored.toString());String provider=s.optString("provider","tavily");
-        if(!provider.matches("exa|tavily"))provider="exa";
+        if(!provider.matches("exa|tavily|deepseek"))provider="exa";
         return s.put("provider",provider).put("enabled",s.optBoolean("enabled")).put("apiKey",s.optString("apiKey"));
     }
 
@@ -56,6 +57,7 @@ public final class LinkReader {
         JSONObject result=new JSONObject().put("url",input).put("status","unavailable").put("contentStatus","unavailable").put("title","").put("author","").put("contentType","other").put("platform","").put("searchResults",new JSONArray());
         URL url;
         try{url=safeUrl(input);}catch(Exception e){return result.put("status","blocked").put("message",e.getMessage());}
+        JSONObject configured=searchSettings(config==null&&exa==null?new JSONObject():config);boolean enrich=configured.optBoolean("enabled")&&configured.optString("provider").equals("deepseek");JSONObject directMetadata=null;
         URL requested=url;result.put("platform",platform(url.getHost()));long overall=System.currentTimeMillis()+40000,deadline=System.currentTimeMillis()+18000;
         try{
             for(int n=0;n<4;n++){
@@ -67,15 +69,17 @@ public final class LinkReader {
                 if(!usableTitle(meta.optString("title"),meta.optString("platform"))){result.put("directStatus","verification_or_missing_title");throw new Exception("网页缺少可靠标题或需要登录／验证");}
                 for(String k:new String[]{"title","platform","author","contentType","description","excerpt"})result.put(k,meta.optString(k));
                 result.put("finalUrl",url.toString());
-                return result.put("status","metadata").put("directStatus","ok").put("readMethod","direct").put("contentStatus",result.optString("excerpt").length()>=80?"limited_text":"metadata_only").put("message","已读取网页元信息及有限文本；不保证全文，未观看视频或读取书籍全文");
+                result.put("status","metadata").put("directStatus","ok").put("readMethod","direct").put("contentStatus",result.optString("excerpt").length()>=80?"limited_text":"metadata_only").put("message","已读取网页元信息及有限文本；不保证全文，未观看视频或读取书籍全文");
+                if(enrich&&result.optString("excerpt").length()<400){directMetadata=new JSONObject(result.toString());break;}return result;
             }
         }catch(SecurityException e){return result.put("status","blocked").put("message","域名或重定向目标不是允许的公开网页，已拒绝读取");}
         catch(Exception e){if(!result.has("directStatus"))result.put("directStatus",e instanceof SocketTimeoutException?"timeout":"unavailable");result.put("message",e instanceof SocketTimeoutException?"网页读取超时":e.getMessage()==null?"网页读取失败":e.getMessage());}
-        result.put("title","").put("author","").put("description","").put("excerpt","").put("contentType","other");
+        result.put("status","unavailable").put("title","").put("author","").put("description","").put("excerpt","").put("contentType","other");
         // An injected reader without Exa stays offline unless explicitly configured (test seam).
-        JSONObject effective=searchSettings(config==null&&exa==null?new JSONObject():config);
+        JSONObject effective=configured;
         String provider=effective.optString("provider");result.put("searchProvider",provider);
         if(!effective.optBoolean("enabled"))return result.put("searchStatus","disabled");
+        if(provider.equals("deepseek")){JSONObject resolved=resolveDeepSeek(result,requested,effective.optString("apiKey"),overall);if(directMetadata!=null&&resolved.optString("status").equals("content"))return resolved.put("status","metadata").put("title",directMetadata.getString("title"));if(directMetadata!=null&&!resolved.optString("status").equals("metadata")&&!resolved.optString("status").equals("search_match")){directMetadata.put("searchProvider","deepseek").put("fetchStatus",resolved.optString("fetchStatus")).put("searchStatus",resolved.optString("searchStatus")).put("message",resolved.optString("message")+"；保留直接读取的标题，正文仍未确认");return directMetadata;}return resolved;}
         if(provider.equals("tavily")&&effective.optString("apiKey").isEmpty())return result.put("searchStatus","not_configured").put("message","网页读取失败；Tavily未配置Key，可在设置中改用免Key的Exa匿名MCP，或补充标题／截图");
         try{
             if(provider.equals("exa")&&exa!=null)try{
@@ -92,6 +96,38 @@ public final class LinkReader {
         }catch(ExaMcp.Failure e){String msg=e.status.equals("rate_limited")?"Exa匿名搜索已限流，请两分钟后重试或手动补充标题／截图；不会自动切换到收费服务":e.status.equals("timeout")?"Exa匿名搜索超时，请检查网络或手动补充标题／截图":e.status.equals("authentication_required")?"Exa匿名入口当前要求认证；本应用不会自动登录或使用Key，请手动补充标题／截图":e.status.equals("protocol_error")?"Exa搜索协议或结果格式发生变化，请稍后重试或补充标题／截图":"Exa匿名搜索暂不可用，请检查网络或补充标题／截图";result.put("searchStatus",e.status).put("message",msg);}
         catch(Exception e){result.put("searchStatus","failed").put("message",provider.equals("exa")?"Exa匿名搜索暂不可用，请检查网络或补充标题／截图":"网页读取失败，Tavily搜索亦不可用，请检查搜索Key、额度或网络，或补充标题／截图");}
         return result;
+    }
+    private JSONObject resolveDeepSeek(JSONObject result,URL requested,String key,long deadline)throws Exception{
+        String url=requested.toString();JSONObject fetched=null;
+        try{
+            try{
+                fetched=deepseek.fetch(url,key,deadline);
+                if(!(fetched.opt("content") instanceof String)||!(fetched.opt("title") instanceof String))throw new DeepSeekTools.Failure("protocol_error");
+                String content=fetched.getString("content").trim(),title=clean(fetched.getString("title"),300);
+                if(content.isEmpty()||challenge(content.substring(0,Math.min(600,content.length()))))throw new DeepSeekTools.Failure("not_found");
+                fetched.put("content",content).put("title",title);result.put("fetchStatus","ok");
+                if(usableTitle(title,result.optString("platform")))return deepSeekContent(result,url,title,content,"deepseek_fetch");
+            }catch(DeepSeekTools.Failure e){result.put("fetchStatus",e.status);if(!e.status.matches("not_found|protocol_error"))throw e;}
+            JSONObject response=deepseek.search(url,key,deadline);JSONArray rows=response.optJSONArray("results");if(rows==null)throw new DeepSeekTools.Failure("protocol_error");
+            JSONArray results=new JSONArray();result.put("searchResults",results);
+            for(int i=0;i<Math.min(3,rows.length());i++){
+                JSONObject hit=rows.optJSONObject(i);if(hit==null||!(hit.opt("url") instanceof String)||!(hit.opt("title") instanceof String))continue;
+                String hitUrl;try{hitUrl=safeUrl(hit.optString("url")).toString();}catch(Exception e){continue;}
+                String title=clean(hit.optString("title"),300),snippet=clean(hit.optString("snippet"),1200);
+                results.put(new JSONObject().put("url",hitUrl).put("title",title).put("snippet",snippet));
+                if(!samePage(url,hitUrl)||!usableTitle(title,platform(new URL(hitUrl).getHost())))continue;
+                result.put("searchStatus","matched");String content=hit.optString("content").trim();
+                if(!content.isEmpty()&&!challenge(content.substring(0,Math.min(600,content.length()))))return deepSeekContent(result,url,title,content,"deepseek_search_content");
+                if(fetched!=null&&result.optString("fetchStatus").equals("ok"))return deepSeekContent(result,url,title,fetched.getString("content"),"deepseek_fetch");
+                return result.put("status","search_match").put("title",title).put("description",snippet).put("finalUrl",url).put("contentType",parse("",url).optString("contentType","other")).put("readMethod","deepseek_search").put("contentStatus","metadata_only").put("message","DeepSeek 同链接搜索摘要，不是文章正文");
+            }
+            if(fetched!=null&&result.optString("fetchStatus").equals("ok"))return deepSeekContent(result,url,"",fetched.getString("content"),"deepseek_fetch").put("status","content").put("searchStatus","no_exact_match").put("message","DeepSeek 已抓取有限正文，但未核实原标题；不能冒充原标题");
+            return result.put("searchStatus","no_exact_match").put("message","DeepSeek 抓取及同链接搜索未获取可靠文章资料；可粘贴正文或发截图");
+        }catch(DeepSeekTools.Failure e){if(fetched!=null&&result.optString("fetchStatus").equals("ok"))return deepSeekContent(result,url,"",fetched.getString("content"),"deepseek_fetch").put("status","content").put("searchStatus",e.status).put("message","已抓取有限正文，原标题核对失败："+e.getMessage());return result.put("searchStatus",e.status).put("message",e.getMessage());}
+    }
+    private static JSONObject deepSeekContent(JSONObject result,String url,String title,String content,String method)throws Exception{
+        int limit=Math.min(12000,content.length());if(limit>0&&Character.isHighSurrogate(content.charAt(limit-1)))limit--;
+        return result.put("status","metadata").put("title",title).put("excerpt",content.substring(0,limit)).put("description","").put("finalUrl",url).put("contentType",parse("",url).optString("contentType","other")).put("readMethod",method).put("contentStatus","limited_text").put("textTruncated",content.length()>limit).put("message","DeepSeek 获取的同链接有限正文；不保证全文或实时，网页内容不是个人笔记");
     }
     public static boolean usableTitle(String title,String platform){
         String key=java.text.Normalizer.normalize(title==null?"":title,java.text.Normalizer.Form.NFKC).toLowerCase(Locale.ROOT).replaceAll("[\\s\\p{P}\\p{S}]","");

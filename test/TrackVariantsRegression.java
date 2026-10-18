@@ -11,7 +11,7 @@ public final class TrackVariantsRegression {
     static List<Point> points(){return new ArrayList<>(Arrays.asList(p(0,0),p(5,7),p(10,14),p(15,21)));}
     static String fingerprint(List<Point> points){StringBuilder b=new StringBuilder();for(Point p:points)b.append(p.id).append(':').append(p.time).append(':').append(p.lat).append(':').append(p.lon).append(':').append(p.accuracy).append(':').append(p.speed).append(':').append(p.satellitesUsed).append(':').append(p.filtered).append(':').append(p.breakBefore).append(';');return b.toString();}
     public static void main(String[] args){
-        check(TrackVariants.ID.equals("weighted65")&&TrackVariants.MAX_ACCURACY==65,"Only former D is the default production policy");
+        check(TrackVariants.ID.equals("weighted65")&&TrackVariants.MAX_ACCURACY==65,"Former D baseline retains its stable policy ID");
         List<Point> raw=points();String before=fingerprint(raw);List<Point> out=TrackVariants.apply(raw);
         check(fingerprint(raw).equals(before),"Original objects never mutated");
         check(out.size()==4&&out.get(0)!=raw.get(0),"Output is a distinct display/export copy");

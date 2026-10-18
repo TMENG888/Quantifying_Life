@@ -1,0 +1,16 @@
+知时 1.9.0：地图开源组件
+
+Mapsforge 0.25.0（core/map/map-reader/map-android/themes）
+Copyright Mapsforge project contributors. LGPL-3.0-or-later.
+未修改上游库。对应源码与构建说明：
+https://github.com/mapsforge/mapsforge/tree/0.25.0
+
+AndroidSVG 1.4
+Copyright Paul LeBeau / AndroidSVG contributors. Apache-2.0.
+https://github.com/BigBadaboom/androidsvg/tree/1.4
+
+以下附上完整LGPL、GPL及Apache许可证。地图数据的版权及使用条件独立适用，OSM数据贡献者署名显示在地图下方。
+
+重新链接：应用源代码仓库 https://github.com/TMENG888/Quantifying_Life 。下载对应版本源码；tools/fetch-map-deps.ps1锁定依赖版本和SHA256。可根据Mapsforge上游说明编译自己的jar，并在本地构建时更新对应校验值，或将Gradle依赖替换为本地库，再运行tools/build.ps1或Gradle构建。详细步骤见docs/第三方组件.md。无需原签名即可运行重新链接版本；请自行备份后使用自有签名/不同applicationId测试，避免影响现有数据。允许为调试这些库的修改进行必要的逆向工程，不限制LGPL赋予的权利。
+
+未复制GPSLogger或许可未明确的Mad库代码；未包含任何用户轨迹或城市地图包。

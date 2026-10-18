@@ -62,11 +62,15 @@ public class MainActivity extends Activity {
     private final ExecutorService tasks = Executors.newFixedThreadPool(3);
     // Slow tiles must never occupy workers used by mode switching or life records.
     private final ExecutorService mapTasks = Executors.newFixedThreadPool(2);
+    private final ExecutorService roadTasks = Executors.newSingleThreadExecutor();
     private byte[] exportBytes;
     private String pickKind = "attachment";
     private boolean loaded;
     private Intent pendingShare;
-    private static final int PICK = 10, EXPORT = 11, PICK_MAP=12;
+    private static final int PICK = 10, EXPORT = 11, PICK_MAP=12, EXPORT_TRACK_FEEDBACK=13, PICK_ROADS=14;
+    private final java.util.concurrent.atomic.AtomicBoolean feedbackBusy=new java.util.concurrent.atomic.AtomicBoolean();
+    private final java.util.concurrent.atomic.AtomicBoolean feedbackRunning=new java.util.concurrent.atomic.AtomicBoolean();
+    private volatile JSONObject feedbackStatus=new JSONObject();
     private static final int FILE_LIMIT = 12 * 1024 * 1024;
 
     @Override public void onCreate(Bundle state) {
@@ -108,7 +112,7 @@ public class MainActivity extends Activity {
     }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); if(loaded)handleShare(intent);else pendingShare=intent; }
     @Override public void onBackPressed() { web.evaluateJavascript("window.appBack && window.appBack()",value->{if(!"true".equals(value))super.onBackPressed();}); }
-    @Override protected void onDestroy() { MapTiles.cancelRequests(); mapTasks.shutdownNow(); tasks.shutdownNow(); if(tracks!=null)tracks.close(); if(web!=null){web.removeJavascriptInterface("LifeNative");web.destroy();} super.onDestroy(); }
+    @Override protected void onDestroy() { MapTiles.cancelRequests(); mapTasks.shutdownNow(); roadTasks.shutdownNow(); tasks.shutdownNow(); if(tracks!=null)tracks.close(); if(web!=null){web.removeJavascriptInterface("LifeNative");web.destroy();} super.onDestroy(); }
 
     private JSONObject trackingStatus()throws Exception{
         SharedPreferences p=TrackingService.prefs(this);JSONObject s=new JSONObject();
@@ -139,10 +143,11 @@ public class MainActivity extends Activity {
     private void deliver(String id, Object data, String error) {
         main.post(()-> {try {JSONObject result=new JSONObject(); result.put("id",id);result.put("data",data);result.put("error",error==null?JSONObject.NULL:error); web.evaluateJavascript("window.nativeReply("+result.toString()+")",null);}catch(Exception ignored){}});
     }
-    private void event(String name, Object data) { main.post(()->web.evaluateJavascript("window.nativeEvent("+JSONObject.quote(name)+","+data.toString()+")",null)); }
+    private void event(String name, Object data) { main.post(()->{if(!isDestroyed()&&web!=null)web.evaluateJavascript("window.nativeEvent("+JSONObject.quote(name)+","+data.toString()+")",null);}); }
+    private void feedbackEvent(String state,long done,long total,String message){try{feedbackStatus=new JSONObject().put("state",state).put("done",done).put("total",total).put("message",message);event("trackFeedback",feedbackStatus);}catch(Exception ignored){}}
     private class Bridge {
         @JavascriptInterface public void call(String action,String input,String id) {
-            (action.equals("trackTile")?mapTasks:tasks).execute(()->{try{deliver(id,execute(action,new JSONObject(input)),null);}catch(Exception e){deliver(id,null,cleanError(e));}});
+            (action.equals("trackRoadMatch")?roadTasks:action.equals("trackTile")?mapTasks:tasks).execute(()->{try{deliver(id,execute(action,new JSONObject(input)),null);}catch(Exception e){deliver(id,null,cleanError(e));}});
         }
     }
     private String cleanError(Exception e) {
@@ -154,8 +159,11 @@ public class MainActivity extends Activity {
     private Object execute(String action,JSONObject p) throws Exception {
         switch(action) {
             case "init": {
-                JSONObject o=new JSONObject();o.put("records",store.records());JSONObject chat=ChatStore.get(store.getWritableDatabase(),this,null);o.put("messages",chat.getJSONArray("messages"));o.put("chatSession",chat.getJSONObject("session"));o.put("chatSessions",chat.getJSONArray("sessions"));o.put("wikiPages",store.wikiPages());o.put("settings",publicSettings());return o;
+                JSONObject o=new JSONObject();o.put("records",store.records());JSONObject chat=ChatStore.get(store.getWritableDatabase(),this,null);o.put("messages",chat.getJSONArray("messages"));o.put("chatSession",chat.getJSONObject("session"));o.put("chatSessions",chat.getJSONArray("sessions"));o.put("wikiPages",store.wikiPages());o.put("wikiInsights",WikiInsightStore.get(store.getWritableDatabase()));o.put("settings",publicSettings());return o;
             }
+            case "getWikiInsights": return WikiInsightStore.get(store.getWritableDatabase());
+            case "saveWikiInsight": return WikiInsightStore.save(store.getWritableDatabase(),p.getJSONObject("report"));
+            case "reviewWikiInsight": return WikiInsightStore.review(store.getWritableDatabase(),p);
             case "getRecords": return store.records();
             case "saveWiki": return store.saveWiki(p.getJSONObject("page"));
             case "getWikiJob": return store.wikiJob(p.getString("id"));
@@ -169,9 +177,13 @@ public class MainActivity extends Activity {
             case "deleteWiki": store.getWritableDatabase().delete("wiki_pages","id=?",new String[]{p.getString("id")});return true;
             case "applyRecordAction": return store.applyAction(p);
             case "trackDay": {JSONObject day=tracks.day(p.getString("date"));day.put("status",trackingStatus());day.put("dates",tracks.dates());return day;}
+            case "trackRoadStatus": return RoadNetwork.info(this);
+            case "trackRoadConfig": RoadNetwork.configure(this,p);return RoadNetwork.info(this);
+            case "trackRoadMatch": return RoadNetwork.match(this,tracks.day(p.getString("date")));
+            case "trackImportRoads": main.post(()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("*/*");i.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i,PICK_ROADS);});return true;
             case "trackStart": main.post(this::startTrackingUI);return true;
             case "trackStop": TrackingService.prefs(this).edit().putBoolean("enabled",false).putString("message","已暂停记录").apply();main.post(()->stopService(new Intent(this,TrackingService.class)));return true;
-            case "trackConfig": {SharedPreferences.Editor edit=TrackingService.prefs(this).edit();if(p.has("resumeAfterReboot"))edit.putBoolean("resumeAfterReboot",p.getBoolean("resumeAfterReboot"));if(p.has("mapConsent"))edit.putBoolean("mapConsent",p.getBoolean("mapConsent"));if(p.has("mapMode")){String mode=p.getString("mapMode");if(!mode.matches("online|offline"))throw new Exception("地图模式无效");if(mode.equals("online")&&!p.optBoolean("mapConsent"))throw new Exception("在线地图需先取得同意");edit.putString("mapMode",mode).putString("mapProvider","osm");}edit.apply();if(p.has("mapMode")||p.has("mapConsent"))MapTiles.cancelRequests();return trackingStatus();}
+            case "trackConfig": {SharedPreferences.Editor edit=TrackingService.prefs(this).edit();if(p.has("filterMode")){String filter=p.getString("filterMode");if(!filter.equals(TrackVariants.ID)&&!filter.equals(TrackFusion.ID))throw new Exception("轨迹方案无效");edit.putString("filterMode",filter);}if(p.has("resumeAfterReboot"))edit.putBoolean("resumeAfterReboot",p.getBoolean("resumeAfterReboot"));if(p.has("mapConsent"))edit.putBoolean("mapConsent",p.getBoolean("mapConsent"));if(p.has("mapMode")){String mode=p.getString("mapMode");if(!mode.matches("online|offline"))throw new Exception("地图模式无效");if(mode.equals("online")&&!p.optBoolean("mapConsent"))throw new Exception("在线地图需先取得同意");edit.putString("mapMode",mode).putString("mapProvider","osm");}edit.apply();if(p.has("mapMode")||p.has("mapConsent"))MapTiles.cancelRequests();return trackingStatus();}
             case "trackDeleteDay": return tracks.deleteDay(p.getString("date"));
             case "trackMapView": return MapTiles.begin(this,p.getLong("view"),p.getString("mode"));
             case "trackTile": {String mode=p.optString("mode",TrackingService.prefs(this).getString("mapMode","offline"));if(!mode.matches("online|offline"))throw new Exception("地图模式无效");return MapTiles.get(this,p.getInt("z"),p.getInt("x"),p.getInt("y"),privateSettings().optString("mapTileKey"),mode.equals("offline"),p.optLong("view",0));}
@@ -182,8 +194,14 @@ public class MainActivity extends Activity {
                 TrackingService.prefs(this).edit().putString("mapProvider",provider).putString("mapRevision",java.util.UUID.randomUUID().toString()).putBoolean("mapConsent",false).apply();return trackingStatus();
             }
             case "trackExport": {
-                String date=p.getString("date");exportBytes=tracks.gpx(date).getBytes(StandardCharsets.UTF_8);exportLabel="轨迹GPX已保存，含精确位置，请妥善保管";
-                main.post(()->{Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/gpx+xml");intent.putExtra(Intent.EXTRA_TITLE,"知时轨迹-"+date+".gpx");startActivityForResult(intent,EXPORT);});return true;
+                String date=p.getString("date");exportBytes=tracks.gpx(date,p.optBoolean("raw")).getBytes(StandardCharsets.UTF_8);exportLabel="轨迹GPX已保存，含精确位置，请妥善保管";
+                main.post(()->{Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/gpx+xml");intent.putExtra(Intent.EXTRA_TITLE,(p.optBoolean("raw")?"知时原始定位-":"知时轨迹-")+date+".gpx");startActivityForResult(intent,EXPORT);});return true;
+            }
+            case "trackFeedbackStatus": return feedbackStatus;
+            case "trackExportAll": {
+                if(!feedbackBusy.compareAndSet(false,true))throw new Exception("全部定位正在导出，请稍候");
+                feedbackEvent("choosing",0,0,"请选择反馈包的保存位置");
+                main.post(()->{try{Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/zip");intent.putExtra(Intent.EXTRA_TITLE,"知时全部定位反馈-"+new SimpleDateFormat("yyyyMMdd-HHmmss",Locale.US).format(new Date())+".zip");startActivityForResult(intent,EXPORT_TRACK_FEEDBACK);}catch(Exception e){feedbackBusy.set(false);feedbackEvent("failed",0,0,"无法打开保存位置，请重试");}});return true;
             }
             case "trackDiagnostics": {
                 String date=p.getString("date");JSONObject diagnostic=tracks.diagnostics(date);diagnostic.put("device",new JSONObject().put("manufacturer",android.os.Build.MANUFACTURER).put("model",android.os.Build.MODEL).put("androidApi",android.os.Build.VERSION.SDK_INT));exportBytes=diagnostic.toString(2).getBytes(StandardCharsets.UTF_8);exportLabel="轨迹诊断已保存，包含原始精确位置，请妥善保管";
@@ -216,7 +234,8 @@ public class MainActivity extends Activity {
             }
             case "readLinks": {
                 JSONArray urls=p.getJSONArray("urls");if(urls.length()>3)throw new Exception("每次最多读取3个链接，请分批发送");
-                LinkReader reader=new LinkReader();JSONArray sources=new JSONArray();JSONObject search=privateSettings().optJSONObject("linkSearch");
+                LinkReader reader=new LinkReader();JSONArray sources=new JSONArray();JSONObject search=DeepSeekTools.settings(privateSettings());
+                if(search.optString("provider").equals("deepseek")&&!p.optBoolean("allowPaidTools"))search.put("enabled",false);
                 for(int i=0;i<urls.length();i++)sources.put(reader.resolve(urls.getString(i),search));return sources;
             }
             case "saveSettings": {
@@ -244,7 +263,7 @@ public class MainActivity extends Activity {
             }
             case "export": {
                 exportLabel="备份已保存（不包含 API Key；轨迹需在轨迹页单独导出）";
-                JSONObject backup=new JSONObject();backup.put("format","quantlife");backup.put("version",1);backup.put("exportedAt",System.currentTimeMillis());backup.put("records",store.records());backup.put("messages",store.messages());backup.put("wikiPages",store.wikiPages());
+                JSONObject backup=new JSONObject();backup.put("format","quantlife");backup.put("version",1);backup.put("exportedAt",System.currentTimeMillis());backup.put("records",store.records());backup.put("messages",store.messages());backup.put("wikiPages",store.wikiPages());backup.put("wikiInsights",WikiInsightStore.get(store.getWritableDatabase()));
                 exportBytes=backup.toString(2).getBytes(StandardCharsets.UTF_8);
                 main.post(()->{Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");intent.putExtra(Intent.EXTRA_TITLE,"知时备份-"+new SimpleDateFormat("yyyyMMdd-HHmm",Locale.US).format(new Date())+".json");startActivityForResult(intent,EXPORT);});return true;
             }
@@ -262,7 +281,7 @@ public class MainActivity extends Activity {
         }
     }
     private class Store extends SQLiteOpenHelper {
-        @Override public void onOpen(SQLiteDatabase db){super.onOpen(db);db.execSQL("CREATE TABLE IF NOT EXISTS wiki_jobs (id TEXT PRIMARY KEY,payload TEXT NOT NULL)");try{WorkLogMigration.run(db);}catch(Exception e){throw new android.database.sqlite.SQLiteException("工作日志迁移失败，原始内容保留",e);}}
+        @Override public void onOpen(SQLiteDatabase db){super.onOpen(db);db.execSQL("CREATE TABLE IF NOT EXISTS wiki_jobs (id TEXT PRIMARY KEY,payload TEXT NOT NULL)");WikiInsightStore.create(db);try{WorkLogMigration.run(db);}catch(Exception e){throw new android.database.sqlite.SQLiteException("工作日志迁移失败，原始内容保留",e);}}
         Store(){super(MainActivity.this,"quantlife.db",null,4);}
         @Override public void onCreate(SQLiteDatabase db) {
             db.execSQL("CREATE TABLE records (id TEXT PRIMARY KEY,type TEXT NOT NULL,date TEXT NOT NULL,title TEXT NOT NULL,platform TEXT NOT NULL,payload TEXT NOT NULL)");
@@ -344,7 +363,7 @@ public class MainActivity extends Activity {
         String[] parts=encrypted.split(":");Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Base64.decode(parts[0],Base64.NO_WRAP)));return new JSONObject(new String(c.doFinal(Base64.decode(parts[1],Base64.NO_WRAP)),StandardCharsets.UTF_8));
     }
     private void encryptSettings(JSONObject s)throws Exception{Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,key());String encrypted=Base64.encodeToString(c.getIV(),Base64.NO_WRAP)+":"+Base64.encodeToString(c.doFinal(s.toString().getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP);if(!getSharedPreferences("secure",MODE_PRIVATE).edit().putString("settings",encrypted).commit())throw new Exception("设置保存失败");}
-    private JSONObject publicSettings()throws Exception{JSONObject s=privateSettings();s.put("wikiAutomation",WikiAutomation.settings(this));s.remove("mapTileKey");JSONObject search=LinkReader.searchSettings(s.optJSONObject("linkSearch"));search.put("keyConfigured",!search.optString("apiKey").isEmpty());search.remove("apiKey");s.put("linkSearch",search);JSONObject profiles=s.optJSONObject("profiles");if(profiles!=null){java.util.Iterator<String> it=profiles.keys();while(it.hasNext()){JSONObject p=profiles.getJSONObject(it.next());p.put("keyConfigured",!p.optString("apiKey").isEmpty());p.remove("apiKey");}}return s;}
+    private JSONObject publicSettings()throws Exception{JSONObject s=privateSettings();s.put("wikiAutomation",WikiAutomation.settings(this));s.remove("mapTileKey");JSONObject search=DeepSeekTools.settings(s);search.put("keyConfigured",!search.optString("apiKey").isEmpty());search.remove("apiKey");s.put("linkSearch",search);JSONObject profiles=s.optJSONObject("profiles");if(profiles!=null){java.util.Iterator<String> it=profiles.keys();while(it.hasNext()){JSONObject p=profiles.getJSONObject(it.next());p.put("keyConfigured",!p.optString("apiKey").isEmpty());p.remove("apiKey");}}return s;}
 
     private JSONObject ask(JSONObject p) throws Exception {
         JSONObject settings=privateSettings(),profiles=settings.optJSONObject("profiles");String active=settings.optString("activeProfile");
@@ -392,8 +411,18 @@ public class MainActivity extends Activity {
         Uri uri=intent.getParcelableExtra(Intent.EXTRA_STREAM);
         if(uri!=null)readAttachment(uri,"attachment");else{String text=intent.getStringExtra(Intent.EXTRA_TEXT);if(text!=null){try{JSONObject data=new JSONObject();data.put("kind","text");data.put("name","分享内容");data.put("text",text);event("attachment",data);}catch(Exception ignored){}}}
     }
-    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(result!=RESULT_OK||data==null)return;Uri uri=data.getData();if(uri==null)return;
+    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);
+        if(request==EXPORT_TRACK_FEEDBACK){Uri destination=data==null?null:data.getData();if(result!=RESULT_OK||destination==null){feedbackBusy.set(false);feedbackEvent("cancelled",0,0,"已取消导出");return;}if(!feedbackRunning.compareAndSet(false,true))return;feedbackBusy.set(true);
+            feedbackEvent("writing",0,0,"正在导出全部定位…");tasks.execute(()->{try{
+                JSONObject report;try(TrackStore feedbackStore=new TrackStore(getApplicationContext());OutputStream out=getContentResolver().openOutputStream(destination,"wt")){
+                    if(out==null)throw new java.io.IOException("无法写入所选位置");report=TrackFeedback.write(this,feedbackStore,out,(done,total)->feedbackEvent("writing",done,total,"正在导出 "+done+" / "+total+" 个定位点…"));
+                }
+                feedbackRunning.set(false);feedbackBusy.set(false);feedbackEvent("complete",report.getLong("totalRawPoints"),report.getLong("totalRawPoints"),"已保存全部定位："+report.getInt("dateCount")+" 个日期，"+report.getLong("totalRawPoints")+" 个点。请自行分享给信任的人。");
+            }catch(Exception e){feedbackRunning.set(false);feedbackBusy.set(false);feedbackEvent("failed",0,0,"导出失败："+cleanError(e)+"；生成的文件可能不完整，请重试。");}finally{feedbackRunning.set(false);feedbackBusy.set(false);}});return;
+        }
+        if(result!=RESULT_OK||data==null)return;Uri uri=data.getData();if(uri==null)return;
         if(request==PICK)readAttachment(uri,pickKind);
+        if(request==PICK_ROADS){try{event("notice",new JSONObject().put("message","正在本机导入路网，完成前请保持App打开"));}catch(Exception ignored){}roadTasks.execute(()->{try{RoadNetwork.importFile(this,uri);event("offlineMap",new JSONObject().put("message","离线路网已导入；道路推断不改写原定位或里程"));}catch(Exception e){try{event("notice",new JSONObject().put("message","路网导入失败："+cleanError(e)));}catch(Exception ignored){}}});}
         if(request==PICK_MAP){tasks.execute(()->{try{OfflineMap.importFile(this,uri);event("offlineMap",new JSONObject().put("message","离线地图已导入，不影响轨迹记录"));}catch(Exception e){try{event("notice",new JSONObject().put("message","地图导入失败："+cleanError(e)));}catch(Exception ignored){}}});}
         if(request==EXPORT){tasks.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(uri)){out.write(exportBytes);JSONObject o=new JSONObject();o.put("message",exportLabel);event("notice",o);}catch(Exception e){try{JSONObject o=new JSONObject();o.put("message","导出失败："+cleanError(e));event("notice",o);}catch(Exception ignored){}}});}
     }

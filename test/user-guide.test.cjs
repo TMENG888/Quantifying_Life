@@ -8,8 +8,8 @@ const guide = read('app/src/main/assets/user-guide.html');
 
 test('offline guide covers each user workflow and important limitations', () => {
   for (const text of ['第一次使用', 'API Key', '净工作时间', '待确认的记录', '截图', '紫色虚线', '恢复只合并原始记录', '验证码', '最近任务预览']) assert.ok(guide.includes(text), text);
-  assert.equal((guide.match(/<details(?: open)?>/g) || []).length, 14);
-  assert.equal((guide.match(/<\/details>/g) || []).length, 14);
+  assert.equal((guide.match(/<details(?: open)?>/g) || []).length, 15);
+  assert.equal((guide.match(/<\/details>/g) || []).length, 15);
 });
 test('bundled guide has no executable or external resources', () => {
   assert.doesNotMatch(guide, /<script|<iframe|<img|<link|on\w+\s*=|(?:src|href)\s*=/i);
@@ -25,8 +25,8 @@ test('screenshot policy permits system capture without adding capture permission
   assert.doesNotMatch(read('app/src/main/AndroidManifest.xml'), /READ_MEDIA_IMAGES|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|CAPTURE_VIDEO_OUTPUT/);
 });
 test('version identifiers agree for the new signed upgrade', () => {
-  assert.equal(JSON.parse(read('package.json')).version, '1.7.10');
-  assert.equal(JSON.parse(read('package-lock.json')).packages[''].version, '1.7.10');
-  assert.match(read('app/build.gradle'), /versionCode 29/);
-  assert.match(read('tools/build.ps1'), /'--version-code','29','--version-name','1.7.10'/);
+  assert.equal(JSON.parse(read('package.json')).version, '1.9.7');
+  assert.equal(JSON.parse(read('package-lock.json')).packages[''].version, '1.9.7');
+  assert.match(read('app/build.gradle'), /versionCode 38/);
+  assert.match(read('tools/build.ps1'), /'--version-code','38','--version-name','1.9.7'/);
 });
