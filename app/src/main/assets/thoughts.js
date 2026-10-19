@@ -16,5 +16,5 @@
     $('cancel-thought').onclick=env.closeEditor;
     $('thought-form').onsubmit=e=>{e.preventDefault();env.safe(async()=>{const note=$('thought-note').value,chosen=$('thought-time').value,occurredAt=chosen===r.occurredAt.slice(0,16)?r.occurredAt:chosen+':00',updated={...r,type:$('thought-type').value,note,title:$('thought-title').value.trim()||D.thoughtTitle(note),occurredAt,date:occurredAt.slice(0,10),tags:$('thought-tags').value.split(/[,，]/).map(x=>x.trim()).filter(Boolean).slice(0,20),durationMinutes:0,masteryLevel:'unspecified',evidenceType:'none',evidenceNote:'',platform:'',contentType:'other',status:'completed'};D.validate(updated);const dup=D.duplicate(updated,env.state.records);if(dup&&!await env.confirm('可能重复',`同一天已有「${dup.title}」。确实要另存一条吗？`,'仍然保存'))return;await env.save(updated,!!dup);if(candidateIndex!==null)env.state.candidates.splice(candidateIndex,1);env.closeEditor();env.render();env.toast('已保存到本地，可在 AI 助手中按时间或主题找回');});};
   }
-  root.ThoughtsUI={init:e=>{env=e;},page,bind,card,candidate,edit,detail};
+  root.ThoughtsUI={init:e=>{env=e;},page,bind,card,candidate,edit:(r=null,i=null,type='idea')=>root.RecordEditor.open(r,i,type),detail:r=>env.safe(()=>root.RecordEditor.open(r,null,r.type,true))};
 })(window);

@@ -64,7 +64,7 @@ public class MainActivity extends Activity {
     private final ExecutorService mapTasks = Executors.newFixedThreadPool(2);
     private final ExecutorService roadTasks = Executors.newSingleThreadExecutor();
     private byte[] exportBytes;
-    private String pickKind = "attachment";
+    private String pickKind = "attachment", pickRecordId="";
     private boolean loaded;
     private Intent pendingShare;
     private static final int PICK = 10, EXPORT = 11, PICK_MAP=12, EXPORT_TRACK_FEEDBACK=13, PICK_ROADS=14;
@@ -75,6 +75,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        if(state!=null){pickKind=state.getString("pickKind","attachment");pickRecordId=state.getString("pickRecordId","");}
         // Allow user-initiated system screenshots; never capture or upload the screen ourselves.
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         store = new Store();
@@ -101,6 +102,7 @@ public class MainActivity extends Activity {
             @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest req) {
                 Uri uri=req.getUrl();
                 if(!"appassets.androidplatform.net".equals(uri.getHost()))return new WebResourceResponse("text/plain","UTF-8",403,"Blocked",null,new java.io.ByteArrayInputStream(new byte[0]));
+                if(uri.getPath()!=null&&uri.getPath().matches("/record-media/[a-f0-9]{64}\\.jpg")){try{return new WebResourceResponse("image/jpeg",null,new java.io.FileInputStream(RecordMedia.file(MainActivity.this,uri.getLastPathSegment().substring(0,64))));}catch(Exception e){return new WebResourceResponse("text/plain","UTF-8",404,"Not found",null,new java.io.ByteArrayInputStream(new byte[0]));}}
                 String path=uri.getPath();if(path==null||!path.startsWith("/assets/")||path.contains(".."))return new WebResourceResponse("text/plain","UTF-8",404,"Not found",null,new java.io.ByteArrayInputStream(new byte[0]));
                 path=path.substring(8);String mime=path.endsWith(".js")?"application/javascript":path.endsWith(".css")?"text/css":path.endsWith(".html")?"text/html":"text/plain";
                 try{return new WebResourceResponse(mime,"UTF-8",getAssets().open(path));}catch(Exception e){return new WebResourceResponse("text/plain","UTF-8",404,"Not found",null,new java.io.ByteArrayInputStream(new byte[0]));}
@@ -165,6 +167,11 @@ public class MainActivity extends Activity {
             case "saveWikiInsight": return WikiInsightStore.save(store.getWritableDatabase(),p.getJSONObject("report"));
             case "reviewWikiInsight": return WikiInsightStore.review(store.getWritableDatabase(),p);
             case "getRecords": return store.records();
+            case "getDocumentDraft": return DocumentDrafts.get(this);
+            case "saveDocumentDraft": return DocumentDrafts.save(this,p.getJSONObject("draft"));
+            case "clearDocumentDraft": return DocumentDrafts.clear(this,p.getString("id"));
+            case "storeRecordImage": return RecordMedia.fromData(this,p.getString("data"),p.optString("name","图片"));
+            case "saveDocument": return store.saveDocument(p.getJSONObject("record"),p.optBoolean("allowDuplicate"),p.isNull("expectedVersion")?null:p.getLong("expectedVersion"));
             case "saveWiki": return store.saveWiki(p.getJSONObject("page"));
             case "getWikiJob": return store.wikiJob(p.getString("id"));
             case "saveWikiJob": return store.saveWikiJob(p.getJSONObject("job"));
@@ -259,16 +266,18 @@ public class MainActivity extends Activity {
             }
             case "ask": if(p.optBoolean("automaticWiki"))WikiAutomation.reserve(this);return ask(p);
             case "pick": {
-                pickKind=p.optString("kind","attachment");main.post(()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType("*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(intent,PICK);});return true;
+                pickKind=p.optString("kind","attachment");pickRecordId=p.optString("recordId","");String kind=pickKind;main.post(()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType(kind.equals("record-image")?"image/*":"*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(intent,PICK);});return true;
             }
             case "export": {
                 exportLabel="备份已保存（不包含 API Key；轨迹需在轨迹页单独导出）";
                 JSONObject backup=new JSONObject();backup.put("format","quantlife");backup.put("version",1);backup.put("exportedAt",System.currentTimeMillis());backup.put("records",store.records());backup.put("messages",store.messages());backup.put("wikiPages",store.wikiPages());backup.put("wikiInsights",WikiInsightStore.get(store.getWritableDatabase()));
+                backup.put("recordMedia",RecordMedia.exportImages(this,backup.getJSONArray("records")));
                 exportBytes=backup.toString(2).getBytes(StandardCharsets.UTF_8);
                 main.post(()->{Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");intent.putExtra(Intent.EXTRA_TITLE,"知时备份-"+new SimpleDateFormat("yyyyMMdd-HHmm",Locale.US).format(new Date())+".json");startActivityForResult(intent,EXPORT);});return true;
             }
             case "import": {
                 JSONArray list=p.getJSONArray("records");if(list.length()>50000)throw new Exception("一次最多导入 50000 条记录");
+                RecordMedia.restoreImages(this,p.optJSONArray("recordMedia"));
                 SQLiteDatabase db=store.getWritableDatabase();db.beginTransaction();int inserted=0,skipped=0;
                 try{for(int i=0;i<list.length();i++){JSONObject r=list.getJSONObject(i);if(store.has(r.getString("id"))||store.duplicate(r)){skipped++;continue;}store.save(r,false);inserted++;}db.setTransactionSuccessful();}finally{db.endTransaction();}
                 JSONObject result=new JSONObject();result.put("inserted",inserted);result.put("skipped",skipped);result.put("records",store.records());return result;
@@ -307,9 +316,11 @@ public class MainActivity extends Activity {
             }return false;
         }
         synchronized JSONObject save(JSONObject r,boolean allow) throws Exception {SQLiteDatabase db=getWritableDatabase();boolean own=!db.inTransaction();if(own)db.beginTransaction();try{JSONObject saved=saveImpl(r,allow);if(own)db.setTransactionSuccessful();return saved;}finally{if(own)db.endTransaction();}}
+        synchronized JSONObject saveDocument(JSONObject r,boolean allow,Long expected)throws Exception{SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{JSONObject current=record(r.getString("id"));if(expected==null?current!=null:current==null||current.optLong("updatedAt")!=expected)throw new Exception("记录已变化，草稿已保留；请重新打开最新记录后合并，未覆盖原文");if(!r.optString("type").matches("learning|work_note|idea|experience")||!RecordMedia.hasBody(r.optString("note")))throw new Exception("请填写文字正文，图片不能代替正文");if(current!=null&&!current.getString("type").equals(r.getString("type")))throw new Exception("不能更换记录类型");JSONObject saved=saveImpl(r,allow);db.setTransactionSuccessful();return saved;}finally{db.endTransaction();}}
         private JSONObject saveImpl(JSONObject r,boolean allow) throws Exception {
             SQLiteDatabase db=getWritableDatabase();
             String id=r.getString("id"),type=r.getString("type"),date=r.getString("date"),title=r.getString("title").trim();
+            RecordMedia.validate(MainActivity.this,r);
             if(id.isEmpty()||id.length()>100||!type.matches("learning|work|work_note|idea|experience")||!date.matches("\\d{4}-\\d{2}-\\d{2}")||title.isEmpty()||title.length()>300)throw new Exception("记录格式无效");
             parseLocal(date+"T00:00:00");
             for(String field:new String[]{"note","platform","url"}){if(r.has(field)&&!(r.get(field) instanceof String))throw new Exception("笔记、平台和链接必须是文本");if(!r.has(field))r.put(field,"");}
@@ -426,9 +437,11 @@ public class MainActivity extends Activity {
         if(request==PICK_MAP){tasks.execute(()->{try{OfflineMap.importFile(this,uri);event("offlineMap",new JSONObject().put("message","离线地图已导入，不影响轨迹记录"));}catch(Exception e){try{event("notice",new JSONObject().put("message","地图导入失败："+cleanError(e)));}catch(Exception ignored){}}});}
         if(request==EXPORT){tasks.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(uri)){out.write(exportBytes);JSONObject o=new JSONObject();o.put("message",exportLabel);event("notice",o);}catch(Exception e){try{JSONObject o=new JSONObject();o.put("message","导出失败："+cleanError(e));event("notice",o);}catch(Exception ignored){}}});}
     }
-    private void readAttachment(Uri uri,String kind){tasks.execute(()->{try{
+    @Override protected void onSaveInstanceState(Bundle out){out.putString("pickKind",pickKind);out.putString("pickRecordId",pickRecordId);super.onSaveInstanceState(out);}
+    private void readAttachment(Uri uri,String kind){String recordId=pickRecordId;tasks.execute(()->{try{
         String name=uri.getLastPathSegment()==null?"附件":uri.getLastPathSegment();try(Cursor c=getContentResolver().query(uri,null,null,null,null)){if(c!=null&&c.moveToFirst()){int idx=c.getColumnIndex(OpenableColumns.DISPLAY_NAME);if(idx>=0)name=c.getString(idx);}}
-        byte[] bytes=readBytes(getContentResolver().openInputStream(uri),FILE_LIMIT);String mime=getContentResolver().getType(uri);if(mime==null)mime="application/octet-stream";
+        if(kind.equals("record-image")){event("recordImage",RecordMedia.importImage(this,uri,name).put("recordId",recordId));return;}
+        byte[] bytes=readBytes(getContentResolver().openInputStream(uri),kind.equals("backup")?192*1024*1024:FILE_LIMIT);String mime=getContentResolver().getType(uri);if(mime==null)mime="application/octet-stream";
         JSONObject o=new JSONObject();o.put("name",name);o.put("size",bytes.length);String lower=name.toLowerCase(Locale.ROOT);
         if(kind.equals("backup")){JSONObject b=new JSONObject(new String(bytes,StandardCharsets.UTF_8));if(!"quantlife".equals(b.optString("format"))||b.optInt("version")!=1)throw new Exception("这不是知时的数据备份");event("backup",b);return;}
         if(mime.startsWith("image/")||lower.matches(".*\\.(png|jpe?g|webp|gif|heic|heif)$")){

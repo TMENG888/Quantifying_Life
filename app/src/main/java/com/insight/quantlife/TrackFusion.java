@@ -6,8 +6,8 @@ import com.insight.quantlife.TrackFilter.Point;
  * Acceleration is evidence, not displacement. No inertial or road reconstruction. */
 public final class TrackFusion {
     public static final String ID="motion65",LABEL="停留与移动识别",COLOR="#347b64";
-    public static final int REVISION=9;
-    private static final class State {Point anchor;}
+    public static final int REVISION=10;
+    private static final class State {Point anchor,lastObservation;}
     private static double wrap(double x){return ((x+540)%360)-180;}
     private static boolean fresh(Point p){return p.motionAgeMs>=0&&p.motionAgeMs<=3000&&Double.isFinite(p.motionRms);}
     private static boolean travel(Point p){return p.reliableSpeed()&&p.speed>=.6;}
@@ -67,18 +67,20 @@ public final class TrackFusion {
     /** One-frame geometry/sensor positives are not a confirmed departure. Keep
      * their times as uncertain evidence; never discard a genuine measured tail. */
     private static void confirmMovement(List<Point> out){
+        Set<Point> withdrawn=Collections.newSetFromMap(new IdentityHashMap<Point,Boolean>());
         for(int start=0;start<out.size();){Point first=out.get(start);if(!first.motionState.equals("moving")){start++;continue;}int end=start,speeds=travel(first)?1:0;
             while(end+1<out.size()){Point a=out.get(end),b=out.get(end+1);if(!b.motionState.equals("moving")||!a.session.equals(b.session)||!a.provider.equals(b.provider)||b.breakBefore||b.time-a.time>TrackFilter.GAP)break;end++;if(travel(b))speeds++;}
-            if(speeds<2&&(end-start<2||out.get(end).time-first.time<4000)){for(int k=start;k<=end;k++){Point q=out.get(k);q.motionState="uncertain";q.breakBefore=true;}if(end+1<out.size())out.get(end+1).breakBefore=true;}
+            if(speeds<2&&(end-start<2||out.get(end).time-first.time<4000)){for(int k=start;k<=end;k++){Point q=out.get(k);q.motionState="uncertain";q.breakBefore=true;withdrawn.add(q);}if(end+1<out.size())out.get(end+1).breakBefore=true;}
             start=end+1;
         }
         Point anchor=null,previous=null;
         for(Point q:out){if(previous!=null&&(!previous.session.equals(q.session)||q.time-previous.time>TrackFilter.GAP))anchor=null;
             if(q.motionState.equals("moving"))anchor=null;
-            else if(q.motionState.equals("stationary_estimate")||q.motionState.equals("uncertain")){
-                if(anchor!=null&&TrackFilter.distance(anchor,q)<=Math.max(35,2*(anchor.accuracy+q.accuracy))){if(TrackFilter.distance(anchor,q)>.01)q.filtered=true;q.lat=anchor.lat;q.lon=anchor.lon;}
-                else if(q.motionState.equals("stationary_estimate"))anchor=q.copy();
-            }
+            // Classification owns the stop estimate. Do not snap arbitrary unknown
+            // fixes back and forth according to each fix's changing error radius.
+            // Only roll back a withdrawn departure to its still-confirmed stop.
+            else if(withdrawn.contains(q)&&anchor!=null){q.filtered|=TrackFilter.distance(anchor,q)>.01;q.lat=anchor.lat;q.lon=anchor.lon;q.speed=0;}
+            else if(q.motionState.equals("stationary_estimate"))anchor=q.copy();
             if(q.motionState.equals("uncertain")||previous!=null&&previous.motionState.equals("uncertain"))q.breakBefore=true;
             previous=q;
         }
@@ -94,7 +96,13 @@ public final class TrackFusion {
         List<Double> intervals=new ArrayList<>();for(int i=1;i<n;i++)intervals.add((double)(raw.get(i).time-raw.get(i-1).time));
         long window=intervals.isEmpty()?30000:(long)Math.max(30000,Math.min(90000,2.5*median(intervals)));
         Point anchor=state.anchor,previous=null;boolean wasMoving=false;lo=0;hi=0;int dwellLo=0,dwellHi=0;
-        boolean reacquire=!out.isEmpty()&&raw.get(0).time-out.get(out.size()-1).time>300000;
+        Point observationBefore=state.lastObservation,firstObservation=raw.get(0);
+        // A timeout alone is not displacement evidence. If reception resumes in
+        // the same remote noise cloud, retain the existing uncertain stop instead
+        // of drawing a journey that occurred only in our anchor bookkeeping.
+        boolean reacquire=observationBefore!=null&&firstObservation.time-observationBefore.time>300000
+            &&TrackFilter.distance(observationBefore,firstObservation)>Math.max(35,2*(observationBefore.accuracy+firstObservation.accuracy));
+        long departureStart=0;int departureCount=0,departureSpeeds=0;
         for(int i=0;i<n;i++){Point p=smooth.get(i);while(lo<i&&p.time-smooth.get(lo).time>window)lo++;while(hi+1<n&&smooth.get(hi+1).time-p.time<=window)hi++;
             int count=hi-lo+1,third=Math.max(1,count/3),active=0,available=0,quiet=0,moving=0;Point motionReference=null;
             for(int k=lo;k<=hi;k++){Point r=raw.get(k);if(fresh(r)){available++;if(r.motionRms>=.15){active++;if(r.time<=p.time&&p.time-r.time<=30000)motionReference=r;}}if(r.reliableSpeed()&&r.speed<=.25)quiet++;if(travel(r))moving++;}
@@ -129,7 +137,7 @@ public final class TrackFusion {
                 &&travelCount<Math.max(2,dwellCount/8)&&spread.get((spread.size()-1)*4/5)<=Math.max(18,1.6*dwellError);
             // Leaving an established dwell needs independent movement evidence or
             // sustained geometry, not a few reflected fixes sliding to another cluster.
-            if(anchor!=null&&moving<2&&!sensorMove){
+            if(anchor!=null&&departureCount==0&&moving<2&&!sensorMove){
                 int thirdLong=Math.max(1,dwellCount/3);
                 Point da=center(smooth,dwellLo,dwellLo+thirdLong-1,smooth.get(dwellLo+thirdLong/2));
                 Point db=center(smooth,dwellHi-thirdLong+1,dwellHi,smooth.get(dwellHi-thirdLong/2));
@@ -144,6 +152,11 @@ public final class TrackFusion {
             // Keep genuinely ambiguous observations as dashed-only evidence, not
             // isolated accepted islands or invented stationary positions.
             Point q=p.copy();q.motionState=isMoving?"moving":stop?"stationary_estimate":"uncertain";
+            if(isMoving){
+                if(departureCount==0||previous!=null&&!previous.provider.equals(q.provider)){departureStart=q.time;departureCount=0;departureSpeeds=0;}
+                departureCount++;if(travel(q))departureSpeeds++;
+            }else{departureCount=0;departureSpeeds=0;}
+            boolean confirmedDeparture=isMoving&&(departureSpeeds>=2||departureCount>=3&&q.time-departureStart>=4000);
             if(stop){
                 boolean relocated=anchor!=null&&TrackFilter.distance(anchor,c)>Math.max(35,2*(anchor.accuracy+c.accuracy));
                 // A remote cloud reached without a confirmed departure is not a
@@ -153,7 +166,7 @@ public final class TrackFusion {
                 if(anchor==null||wasMoving||relocated&&!hold){anchor=c.copy();
                     if(!out.isEmpty()){Point old=out.get(out.size()-1);if(old.motionState.equals("stationary_estimate")&&TrackFilter.distance(old,anchor)<=Math.max(25,2*(old.accuracy+anchor.accuracy))){anchor.lat=old.lat;anchor.lon=old.lon;}}
                 }q.lat=anchor.lat;q.lon=anchor.lon;q.speed=0;
-            }else if(isMoving){anchor=null;}
+            }else if(isMoving){if(confirmedDeparture)anchor=null;}
             else if(anchor!=null&&TrackFilter.distance(anchor,p)<=Math.max(25,anchor.accuracy+p.accuracy)){
                 // Existing dwell + overlapping uncertainty: retain its estimate;
                 // absence of a sensor alone never establishes a new stop.
@@ -162,14 +175,14 @@ public final class TrackFusion {
             else if(anchor!=null&&!reacquire){q.lat=anchor.lat;q.lon=anchor.lon;q.speed=0;}
             q.filtered=TrackFilter.distance(q,raw.get(i))>.01;
             if(previous==null||q.time-previous.time>TrackFilter.GAP)q.breakBefore=!out.isEmpty();
-            else if(!wasMoving&&isMoving&&TrackFilter.distance(previous,q)>Math.max(15,2*acc))q.breakBefore=true;
+            else if(!previous.motionState.equals("moving")&&isMoving&&TrackFilter.distance(previous,q)>Math.max(15,2*acc))q.breakBefore=true;
             else q.breakBefore=false;
             if(q.motionState.equals("uncertain")||previous!=null&&previous.motionState.equals("uncertain")||previous!=null&&!previous.provider.equals(q.provider))q.breakBefore=true;
             if(stop&&previous!=null&&TrackFilter.distance(previous,q)>.01)q.breakBefore=true;
-            out.add(q);previous=q;wasMoving=isMoving;
+            out.add(q);previous=q;wasMoving=confirmedDeparture;
             if(stop||isMoving)reacquire=false;
         }
-        state.anchor=anchor;
+        state.anchor=anchor;state.lastObservation=raw.get(n-1).copy();
     }
     private TrackFusion(){}
 }

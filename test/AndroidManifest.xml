@@ -1,6 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.insight.quantlife.tests">
   <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
   <application android:label="QuantLife local smoke tests" />
+  <instrumentation android:name="com.insight.quantlife.tests.VisualEditorTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.DocumentSafetyTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.DocumentEditorTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.TrackStateUpgradeTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.RoadNetworkTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.TrackRecoveryTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.WikiInsightsTest" android:targetPackage="com.insight.quantlife" />

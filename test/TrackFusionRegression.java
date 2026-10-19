@@ -69,6 +69,18 @@ public final class TrackFusionRegression {
   check(out.get(out.size()-1).time==shortLoop.get(shortLoop.size()-1).time,"Short loop and return stop keep their final timestamp");
   List<Point> activeDesk=new ArrayList<>();Random rng=new Random(1017);for(int t=0;t<7200;t+=2){Point q=p(t,rng.nextGaussian()*5,Double.NaN);q.lon+=rng.nextGaussian()*5/(111195*Math.cos(Math.toRadians(q.lat)));q.accuracy=12;q.motionRms=.6;activeDesk.add(q);}
   check(TrackVariants.meters(TrackFusion.apply(activeDesk))<1,"Continuous phone handling plus stationary noisy GPS is not a walk (meters="+TrackVariants.meters(TrackFusion.apply(activeDesk))+")");
+  List<Point> resumedCloud=new ArrayList<>();for(int i=0;i<210;i++)resumedCloud.add(p(i*2,i<90?0:200,0));for(int i=0;i<90;i++)resumedCloud.add(p(788+i*2,200,0));
+  before=TrackVariantsRegression.fingerprint(resumedCloud);out=TrackFusion.apply(resumedCloud);extent=0;for(Point q:out)extent=Math.max(extent,TrackFilter.distance(out.get(0),q));
+  check(extent<1&&TrackVariants.meters(out)<.01,"A long outage within the same unconfirmed remote cloud cannot reset the anchor and invent a 200m journey");
+  check(before.equals(TrackVariantsRegression.fingerprint(resumedCloud)),"Outage continuity correction leaves raw observations intact");
+  try{
+   java.lang.reflect.Method confirm=TrackFusion.class.getDeclaredMethod("confirmMovement",List.class);confirm.setAccessible(true);
+   List<Point> candidate=new ArrayList<>();Point home=p(0,0,0);home.motionState="stationary_estimate";candidate.add(home);Point one=p(2,60,Double.NaN);one.motionState="moving";candidate.add(one);Point back=p(4,0,0);back.motionState="stationary_estimate";candidate.add(back);confirm.invoke(null,candidate);
+   check(one.motionState.equals("uncertain")&&one.breakBefore&&TrackFilter.distance(home,one)<.01,"Withdrawn one-frame departure rolls back to the last confirmed stop regardless of its error radius");
+   List<Point> unknowns=new ArrayList<>();home=p(0,0,0);home.motionState="stationary_estimate";unknowns.add(home);for(int i=1;i<8;i++){Point q=p(i*2,100,Double.NaN);q.accuracy=i%2==0?60:8;q.motionState="uncertain";unknowns.add(q);}confirm.invoke(null,unknowns);
+   double wobble=0;for(int i=2;i<unknowns.size();i++)wobble+=TrackFilter.distance(unknowns.get(i-1),unknowns.get(i));
+   check(wobble<.01,"Final confirmation never alternates an unknown sequence between old stop and raw cloud as reported accuracy changes");
+  }catch(ReflectiveOperationException e){throw new AssertionError(e);}
   System.out.println("PASS: "+passed+" motion and full-day pipeline checks.");
  }
 }
