@@ -1,4 +1,4 @@
-param([string]$Output = '', [string]$BuildDir = 'E:\Codex\work\2026-10-19-zhishi-visual-editor\build')
+param([string]$Output = '', [string]$BuildDir = 'E:\Codex\work\2026-10-24-track-reliability\build')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $build = $BuildDir
@@ -16,7 +16,7 @@ function Invoke-Checked([string]$Program,[string[]]$Arguments) {
   if ($LASTEXITCODE -ne 0) { throw "Failed: $Program (exit $LASTEXITCODE)" }
 }
 Invoke-Checked (Join-Path $tools 'aapt2.exe') @('compile','--dir',(Join-Path $root 'app/src/main/res'),'-o',(Join-Path $build 'resources.zip'))
-Invoke-Checked (Join-Path $tools 'aapt2.exe') @('link','-o',(Join-Path $build 'unsigned.apk'),'-I',$androidJar,'--manifest',(Join-Path $root 'app/src/main/AndroidManifest.xml'),'--min-sdk-version','26','--target-sdk-version','35','--version-code','41','--version-name','1.10.1','-A',(Join-Path $root 'app/src/main/assets'),'--java',(Join-Path $build 'generated'),(Join-Path $build 'resources.zip'))
+Invoke-Checked (Join-Path $tools 'aapt2.exe') @('link','-o',(Join-Path $build 'unsigned.apk'),'-I',$androidJar,'--manifest',(Join-Path $root 'app/src/main/AndroidManifest.xml'),'--min-sdk-version','26','--target-sdk-version','35','--version-code','57','--version-name','1.13.1','-A',(Join-Path $root 'app/src/main/assets'),'--java',(Join-Path $build 'generated'),(Join-Path $build 'resources.zip'))
 # Windows aapt2 may use backslashes for nested assets; Android AssetManager expects slash paths.
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -58,7 +58,7 @@ if (Test-Path $passwordPath) {
   ConvertTo-SecureString $env:LIFE_SIGN_PASS -AsPlainText -Force | Export-Clixml -LiteralPath $passwordPath
   Invoke-Checked (Join-Path $javaDir 'bin/keytool.exe') @('-genkeypair','-keystore',$keyPath,'-alias','quantlife','-keyalg','RSA','-keysize','2048','-validity','10000','-dname','CN=QuantLife Personal, OU=Personal Apps, O=Insight, C=CN','-storepass:env','LIFE_SIGN_PASS','-keypass:env','LIFE_SIGN_PASS')
 }
-if (!$Output) { $Output = Join-Path $build 'quantlife-1.10.1.apk' }
+if (!$Output) { $Output = Join-Path $build 'quantlife-1.13.1.apk' }
 Invoke-Checked (Join-Path $tools 'apksigner.bat') @('sign','--ks',$keyPath,'--ks-key-alias','quantlife','--ks-pass','env:LIFE_SIGN_PASS','--key-pass','env:LIFE_SIGN_PASS','--out',$Output,(Join-Path $build 'aligned.apk'))
 Remove-Item Env:LIFE_SIGN_PASS
 Invoke-Checked (Join-Path $tools 'apksigner.bat') @('verify','--verbose','--print-certs',$Output)

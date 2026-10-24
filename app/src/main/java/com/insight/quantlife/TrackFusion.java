@@ -6,7 +6,7 @@ import com.insight.quantlife.TrackFilter.Point;
  * Acceleration is evidence, not displacement. No inertial or road reconstruction. */
 public final class TrackFusion {
     public static final String ID="motion65",LABEL="停留与移动识别",COLOR="#347b64";
-    public static final int REVISION=10;
+    public static final int REVISION=11;
     private static final class State {Point anchor,lastObservation;}
     private static double wrap(double x){return ((x+540)%360)-180;}
     private static boolean fresh(Point p){return p.motionAgeMs>=0&&p.motionAgeMs<=3000&&Double.isFinite(p.motionRms);}

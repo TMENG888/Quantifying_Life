@@ -13,7 +13,7 @@ public final class VisualEditorTest extends DocumentEditorTest {
    h.call("saveRecord",new JSONObject().put("record",new JSONObject().put("id","visual-upgrade").put("type","learning").put("date","2026-10-01").put("title","历史格式笔记").put("note",body).put("durationMinutes",37).put("masteryLevel","familiar").put("evidenceType","none").put("evidenceNote","历史证据原样保留").put("tags",new JSONArray().put("历史标签"))));
    try(FileOutputStream out=getTargetContext().openFileOutput("visual-upgrade.json",0)){out.write(state().toString().getBytes("UTF-8"));}
   }else{
-   check(getTargetContext().getPackageManager().getPackageInfo(getTargetContext().getPackageName(),0).versionName.equals("1.10.1"),"New signed APK starts");
+   check(getTargetContext().getPackageManager().getPackageInfo(getTargetContext().getPackageName(),0).versionName.equals("1.10.5"),"New signed APK starts");
    if(phase.equals("verify")){JSONObject old=new JSONObject(new String(java.nio.file.Files.readAllBytes(new File(getTargetContext().getFilesDir(),"visual-upgrade.json").toPath()),"UTF-8")),now=state();for(String key:new String[]{"records","settings","messages","wikiPages"})check(old.get(key).toString().equals(now.get(key).toString()),"Cover install preserves "+key);}
    h.js("RecordEditor.open("+record("visual-upgrade")+")");until("!!document.querySelector('#doc-body')");Thread.sleep(300);
    check(source().equals(body),"Unedited original Markdown round-trips byte for byte: "+source());

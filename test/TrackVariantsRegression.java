@@ -24,6 +24,12 @@ public final class TrackVariantsRegression {
         for(double accuracy:new double[]{0,-1,Double.NaN,Double.POSITIVE_INFINITY}){Point q=p(0,0);q.accuracy=accuracy;check(TrackVariants.apply(Arrays.asList(q)).isEmpty(),"Invalid accuracy rejected: "+accuracy);}
         Point invalid=p(0,0);invalid.lat=Double.NaN;check(TrackVariants.apply(Arrays.asList(invalid)).isEmpty(),"Invalid coordinate rejected");
         Point network=p(0,0);network.provider="network";check(TrackVariants.apply(Arrays.asList(network)).isEmpty(),"Network fix excluded");
+        Point mocked=p(0,0);mocked.mocked=true;check(TrackVariants.apply(Arrays.asList(mocked)).isEmpty(),"Mock location excluded from D as well as motion policy");
+        Point f1=p(1,200),f2=p(2,250);f1.provider=f2.provider="fused";
+        List<Point> interleaved=TrackVariants.apply(Arrays.asList(p(0,0),f1,f2,p(5,7)));
+        check(interleaved.size()==2&&TrackVariants.gaps(interleaved)==0&&Math.abs(TrackVariants.meters(interleaved)-7)<.01,"Ignored Fused callbacks cannot manufacture a GPS gap");
+        Point bad=p(2,200);bad.accuracy=90;
+        check(TrackVariants.gaps(TrackVariants.apply(Arrays.asList(p(0,0),f1,bad,p(5,7))))==0,"One bad GPS plus one ignored source is not two bad GPS fixes");
         check(TrackVariants.apply(Collections.emptyList()).isEmpty()&&TrackVariants.apply(Arrays.asList((Point)null)).isEmpty(),"Empty/null point input supported");
         List<Point> noise=new ArrayList<>(Arrays.asList(p(0,0),p(5,12),p(10,20)));
         noise.get(0).accuracy=10;noise.get(1).accuracy=20;noise.get(2).accuracy=10;
@@ -42,7 +48,7 @@ public final class TrackVariantsRegression {
         check(TrackVariants.gaps(TrackVariants.apply(paused))==1,"Pause session remains separate");
         List<Point> marked=points();marked.get(2).breakBefore=true;check(TrackVariants.gaps(TrackVariants.apply(marked))==1,"Explicit break honoured");
         List<Point> badRun=new ArrayList<>(Arrays.asList(p(0,0),p(5,7),p(10,14),p(15,21)));badRun.get(1).accuracy=90;badRun.get(2).accuracy=90;
-        check(TrackVariants.apply(badRun).get(1).breakBefore,"Two invalid points produce break before next usable point");
+        check(TrackVariants.gaps(TrackVariants.apply(badRun))==0&&Math.abs(TrackVariants.meters(TrackVariants.apply(badRun))-21)<.01,"Rejected callback count is not a time gap between continuous accepted GPS fixes");
         List<Point> spike=new ArrayList<>(Arrays.asList(p(0,0),p(5,150),p(10,14)));spike.get(1).speed=0;
         check(TrackVariants.apply(spike).size()==2,"Isolated return jump rejected");
         List<Point> impossible=new ArrayList<>(Arrays.asList(p(0,0),p(5,1000),p(10,14)));

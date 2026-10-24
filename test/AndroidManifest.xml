@@ -1,6 +1,30 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.insight.quantlife.tests">
   <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
   <application android:label="QuantLife local smoke tests" />
+  <instrumentation android:name="com.insight.quantlife.tests.TrackReliabilityTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.TrackTimeTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ChatScrollTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.LayoutReliabilityTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.LayoutRecoveryTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.LayoutLiveTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.LayoutFlowTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ClockCardTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ImageSaveTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ImageSaveFlowTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.IllustrationRecoveryTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.IllustrationRecoveryFlowTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ReaderSaveTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ReaderSaveSafetyTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ReaderNativeTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.SelectionDismissTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.GalleryColdStartTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.IllustrationLiveTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.IllustrationFlowTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.IllustrationNativeTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ImagePickerFlowTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ImagePickerRecoveryTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ImageSpacingTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.DraftPreviewTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.VisualEditorTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.DocumentSafetyTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.DocumentEditorTest" android:targetPackage="com.insight.quantlife" />

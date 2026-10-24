@@ -13,7 +13,7 @@
   function toast(message){$('toast').textContent=message;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),4500);}
   window.nativeReply=r=>{const p=pending.get(r.id);if(!p)return;clearTimeout(p.timer);pending.delete(r.id);r.error?p.reject(Error(r.error)):p.resolve(r.data);};
   async function api(action,payload={}){
-    if(native)return new Promise((resolve,reject)=>{const id=String(++request);const timer=setTimeout(()=>{pending.delete(id);reject(Error('操作超时，请稍后重试'));},['ask','readLinks'].includes(action)?160000:30000);pending.set(id,{resolve,reject,timer});LifeNative.call(action,JSON.stringify(payload),id);}).then(data=>{if(['saveRecord','saveDocument','deleteRecord','import','applyRecordAction','saveSettings'].includes(action))AutoWiki.resume();return data;});
+    if(native)return new Promise((resolve,reject)=>{const id=String(++request);const timer=setTimeout(()=>{pending.delete(id);reject(Error(action==='createIllustration'?'提交结果未确认，请查询配图任务，不要重复生成':'操作超时，请稍后重试'));},['ask','readLinks','refreshIllustration'].includes(action)?160000:action==='createIllustration'?60000:30000);pending.set(id,{resolve,reject,timer});LifeNative.call(action,JSON.stringify(payload),id);}).then(data=>{if(['saveRecord','saveDocument','deleteRecord','import','applyRecordAction','saveSettings'].includes(action))AutoWiki.resume();return data;});
     const data=JSON.parse(localStorage.getItem('quantlife-preview')||'{"records":[],"messages":[],"settings":{}}');
     let result=true;
     switch(action){
@@ -42,6 +42,7 @@
       case 'deleteWiki':data.wikiPages=(data.wikiPages||[]).filter(p=>p.id!==payload.id);break;
       case 'applyRecordAction':{const before=data.records.find(r=>r.id===payload.recordId);if(!before||Number(before.updatedAt||0)!==payload.expectedVersion)throw Error('记录已被修改或删除');if(payload.kind==='update'){const patch=payload.patch||payload.record||{},updated={...before};for(const k of LifeAgent.fields)if(Object.hasOwn(patch,k)){const v=patch[k];if(k==='note'&&(v===null||v==='')&&before.note&&!payload.clearFields?.includes(k))continue;updated[k]=v;}D.validate(updated);updated.updatedAt=Math.max(Date.now(),(before.updatedAt||0)+1);data.records=data.records.map(r=>r.id===before.id?updated:r);result=updated;}else if(payload.kind==='delete')data.records=data.records.filter(r=>r.id!==before.id);else throw Error('不支持的操作');break;}
       case 'trackDay':return {date:payload.date,points:[],dates:[],status:{message:'浏览器预览不采集定位，请安装安卓版本'}};
+      case 'trackTime':return {date:payload.date,mode:payload.mode,points:[],processedPoints:0,estimatedMeters:0,match:null};
       case 'trackRoadStatus':return {configured:false,enabled:false,mode:'auto'};
       case 'trackRoadMatch':return {routes:[],state:'no_network'};
       case 'trackImportRoads':throw Error('导入离线路网请使用安卓安装版');
@@ -59,6 +60,9 @@
       case 'openUrl':window.open(payload.url,'_blank','noopener');break;
       case 'readLinks':throw Error('链接读取请使用安卓安装版');
       case 'saveLinkSettings':data.settings.linkSearch={enabled:payload.settings.enabled,provider:payload.settings.provider||'exa',keyConfigured:false};result=data.settings;break;
+      case 'getIllustrationJobs':return [];
+      case 'saveRecordImage':throw Error('保存到手机相册请使用安卓安装版');
+      case 'saveImageSettings':case 'createIllustration':case 'refreshIllustration':case 'ackIllustration':throw Error('笔记生图请使用安卓安装版，浏览器预览不保存密钥');
       case 'ask':throw Error('浏览器用于界面预览；请在安卓 App 中配置密钥后使用 AI');
       default:throw Error('未知操作');
     }
@@ -215,13 +219,14 @@
       const response=await api('ask',{messages,tool:{name:'prepare_life_records',description:'准备待确认的学习、工作、灵感或经验记录或回答检索问题；本工具不直接写数据库',parameters:toolsSchema}});const draft=plan.intent==='record'&&!attachment?LifeAgent.workDraft(text):null;let parsed;try{parsed=clockRequest?{answer:'',records:[],citations:[]}:LifeConversation.parseReply(response.text,plan.intent);}catch(err){const fallback=plan.intent==='record'&&!attachment?LifeLinks.noteRecords(text,sources,D.localDate()):[];if(!draft&&!fallback.length)throw err;parsed={answer:'记录待确认',records:draft?[draft]:fallback,citations:[]};}if(plan.intent==='record'&&!parsed.records.length&&draft)parsed.records=[draft];if(plan.intent!=='record')parsed.records=[];const changes=plan.intent==='update'?LifeAgent.prepare(clockRequest?LifeAgent.clockActions(clockRequest,state.records,requestedNow):W.parseJSON(response.text).actions||[],state.records,context.records.map(r=>r.id),requestedNow,{text}):[];const grounded=plan.intent==='update'?{answer:parsed.answer,sourceIds:[]}:WorkFacts.guard(parsed.answer,context.workTiming);parsed.answer=grounded.answer;parsed.citations=[...new Set([...parsed.citations,...grounded.sourceIds].filter(id=>context.availableCitationIds.includes(id)))].slice(0,20);
       if(urls.length){if(plan.intent==='record'&&!parsed.records.length&&!attachment)parsed.records=LifeLinks.noteRecords(text,sources,D.localDate());if(plan.intent!=='record')parsed.records=[];parsed.records=parsed.records.map(r=>r.type==='learning'&&!r.url&&urls.length===1?{...r,url:urls[0]}:r);parsed.records=LifeLinks.applySources(LifeLinks.guardRecords(parsed.records,sources,text+'\n'+(attachment?.text||'')),sources);if(plan.intent!=='record')parsed.answer+='\n\n'+LifeLinks.report(sources);}
       parsed.records=await RecordEditor.completeCandidates(parsed.records);if(attachment?.kind==='image'&&parsed.records.some(r=>r.type!=='work')){const image=await api('storeRecordImage',{data:attachment.data,name:attachment.name});parsed.records=parsed.records.map(r=>r.type==='work'?r:RecordDocument.attach(r,image));}
-      const assistant={id:D.uid(),sessionId:state.chatSession.id,role:'assistant',text:changes.length?`已准备${changes.length}项变更，请查看修改前后再确认；尚未执行。`:plan.intent==='record'?LifeConversation.recordReply(parsed.records,sources,text):parsed.answer,linkDiagnostics:LifeConversation.diagnostics(sources),model:response.model,citations:parsed.citations,createdAt:Date.now()};assistant.contextText=assistant.text+(parsed.records.length?'\n待确认候选（尚未入库，仅在用户明确补充这条时继续核对）：'+JSON.stringify(parsed.records):'');await api('saveMessage',{message:assistant});state.messages.push(assistant);state.candidates=parsed.records;state.changes=changes;
+      const assistant={id:D.uid(),sessionId:state.chatSession.id,role:'assistant',text:changes.length?LifeAgent.changeReply(changes):plan.intent==='record'?LifeConversation.recordReply(parsed.records,sources,text):parsed.answer,linkDiagnostics:LifeConversation.diagnostics(sources),model:response.model,citations:parsed.citations,createdAt:Date.now()};assistant.contextText=assistant.text+(parsed.records.length?'\n待确认候选（尚未入库，仅在用户明确补充这条时继续核对）：'+JSON.stringify(parsed.records):'');await api('saveMessage',{message:assistant});state.messages.push(assistant);state.candidates=parsed.records;state.changes=changes;
     }catch(e){if(!e.workStatus)toast(e.message);const msg={id:D.uid(),sessionId:state.chatSession.id,role:'assistant',text:e.workStatus?e.message:'本次没有写入记录。'+e.message,citations:e.citations||[],createdAt:Date.now()};state.messages.push(msg);await api('saveMessage',{message:msg});}
     finally{state.busy=false;try{const c=await api('getChat',{sessionId:state.chatSession.id});state.chatSession=c.session;state.chatSessions=c.sessions;}catch{}render();}
   }
   async function saveCandidate(i){const r=state.candidates[i];if(!r)return;if(r.type!=='work'&&!RecordDocument.hasBody(r.note)){await RecordEditor.open(r,i,r.type);throw Error('请补充正文内容后保存；仅有链接或时长不能代替笔记');}const dup=D.duplicate(r,state.records),near=D.similar(r,state.records);let allow=false;if(dup||near.length){allow=await confirm('确认不是重复记录？',`已有相关记录「${(dup||near[0].record).title}」。是否仍保存这条？`,'另存一条');if(!allow)return;}await save(r,allow);state.candidates.splice(i,1);render();toast('已保存 1 条记录');}
   window.nativeEvent=(name,data)=>safe(async()=>{
     if(name==='recordImage'){await RecordEditor.image(data);return;}
+    if(name==='recordImageCancelled'){await RecordEditor.cancelImage(data);return;}
     if(name==='offlineMap'){toast(data.message);TrackUI.mapImported();return;}if(name==='notice'){toast(data.message);return;}
     if(name==='trackFeedback'){TrackUI.feedbackProgress(data);if(['complete','failed'].includes(data.state))toast(data.message);return;}
     if(name==='backup'){const records=data.records;if(!Array.isArray(records))throw Error('备份格式无效');records.forEach(D.validate);if(await confirm('恢复备份记录？',`发现 ${records.length} 条记录。相同编号或相同日期、平台、标题的重复记录会跳过。当前对话和模型设置不覆盖。`,'恢复')){const result=await api('import',{records,recordMedia:data.recordMedia});state.records=result.records;render();toast(`恢复 ${result.inserted} 条，跳过 ${result.skipped} 条重复记录`);}return;}
@@ -236,10 +241,10 @@
   setInterval(()=>{if((state.page==='work'||(state.page==='records'&&state.recordTab==='work'))&&running()&&$('work-clock'))$('work-clock').textContent=minutes(D.workMinutes(running()).net);},15000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.page!=='chat'&&state.page!=='settings'&&!$('editor').open)render();});
   const env={state,api,confirm,safe,toast,esc,editorFrame,closeEditor,save,render,go,editRecord,showRecord,outcome:ChatUI.outcome,kickWiki:()=>AutoWiki.kick(),compileWiki,showWiki,insightsChanged:()=>WikiInsightsUI.refresh(),modelConfigured:()=>native&&profile().keyConfigured};
-  RecordEditor.init(env);$('editor').addEventListener('cancel',event=>{if(RecordEditor.active()){event.preventDefault();RecordEditor.back();}});
+  RecordIllustrator.init(env);RecordEditor.init(env);$('editor').addEventListener('cancel',event=>{if(RecordEditor.active()){event.preventDefault();RecordEditor.back();}});
   ModelConfig.init({...env,presets,profile});ChatUI.init({...env,profile,send,action,progress,candidateHTML,linkDiagnosticsHTML,showWiki});
   WikiInsightsUI.init(env);WorkCalendar.init({...env,minutes});WorkNotes.init(env);LifeAgent.init(env);AutoWiki.init(env);
   ThoughtsUI.init({state,api,confirm,safe,toast,esc,editorFrame,closeEditor,save,render,go,editRecord,showRecord});
   TrackUI.init({api,confirm,safe,toast,editorFrame});
-  safe(async()=>{const data=await api('init');state.records=data.records||[];state.wikiPages=data.wikiPages||[];state.wikiInsights=data.wikiInsights||{reports:[],reviews:[]};state.messages=data.messages||[];state.chatSession=data.chatSession||{id:'legacy-chat',title:'新对话',revision:0};state.chatSessions=data.chatSessions||[state.chatSession];state.settings=data.settings||{};render();AutoWiki.kick();});
+  safe(async()=>{const data=await api('init');state.records=data.records||[];state.wikiPages=data.wikiPages||[];state.wikiInsights=data.wikiInsights||{reports:[],reviews:[]};state.messages=data.messages||[];state.chatSession=data.chatSession||{id:'legacy-chat',title:'新对话',revision:0};state.chatSessions=data.chatSessions||[state.chatSession];state.settings=data.settings||{};render();if(native){const pending=await api('pendingRecordImage');if(pending)await RecordEditor.image(pending);RecordIllustrator.resume();}AutoWiki.kick();});
 })();

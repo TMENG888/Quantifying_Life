@@ -11,7 +11,7 @@ public final class TrackFusionRegression {
   check(before.equals(TrackVariantsRegression.fingerprint(raw)),"No raw coordinate/time/flag mutation");
   check(out.size()==raw.size(),"Stationary samples retained with original timestamps");
   check(TrackFilter.distance(out.get(20),out.get(39))<.01,"Sustained quiet motion and Doppler evidence locks stationary drift");
-  check(TrackVariants.meters(out)<TrackVariants.meters(TrackVariants.apply(raw)),"Stationary reference distance reduced in synthetic fixture");
+  check(TrackVariants.meters(out)<.01&&TrackVariants.meters(TrackVariants.apply(raw))<.01,"Both policies suppress the independently confirmed synthetic stationary drift");
   List<Point> walking=line(80,2.8,1.4);List<Point> walk=TrackFusion.apply(walking);check(walk.size()==80,"Slow walking samples preserved");check(Math.abs(TrackVariants.meters(walk)-221.2)<1,"Walking distance not suppressed");
   List<Point> car=line(40,40,20);List<Point> travel=TrackFusion.apply(car);check(TrackVariants.meters(travel)>1558,"Low acceleration at steady vehicle speed does not imply stationary");
   List<Point> bike=line(40,10,5);check(TrackVariants.meters(TrackFusion.apply(bike))>389,"Cycling mileage preserved");

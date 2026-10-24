@@ -18,6 +18,8 @@ import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 import android.view.View;
+import android.view.ActionMode;
+import android.view.inputmethod.InputMethodManager;
 import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
@@ -54,6 +56,9 @@ import android.util.Xml;
 
 public class MainActivity extends Activity {
     private WebView web;
+    private ActionMode editorActionMode;
+    @Override public void onActionModeStarted(ActionMode mode){super.onActionModeStarted(mode);editorActionMode=mode;}
+    @Override public void onActionModeFinished(ActionMode mode){if(editorActionMode==mode)editorActionMode=null;super.onActionModeFinished(mode);}
     private Store store;
     private TrackStore tracks;
     private boolean pendingTrackStart;
@@ -65,9 +70,11 @@ public class MainActivity extends Activity {
     private final ExecutorService roadTasks = Executors.newSingleThreadExecutor();
     private byte[] exportBytes;
     private String pickKind = "attachment", pickRecordId="";
+    private volatile String imageExportId="";
+    private final java.util.concurrent.atomic.AtomicBoolean imageExportBusy=new java.util.concurrent.atomic.AtomicBoolean();
     private boolean loaded;
     private Intent pendingShare;
-    private static final int PICK = 10, EXPORT = 11, PICK_MAP=12, EXPORT_TRACK_FEEDBACK=13, PICK_ROADS=14;
+    private static final int PICK = 10, EXPORT = 11, PICK_MAP=12, EXPORT_TRACK_FEEDBACK=13, PICK_ROADS=14, EXPORT_IMAGE=15;
     private final java.util.concurrent.atomic.AtomicBoolean feedbackBusy=new java.util.concurrent.atomic.AtomicBoolean();
     private final java.util.concurrent.atomic.AtomicBoolean feedbackRunning=new java.util.concurrent.atomic.AtomicBoolean();
     private volatile JSONObject feedbackStatus=new JSONObject();
@@ -75,7 +82,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        if(state!=null){pickKind=state.getString("pickKind","attachment");pickRecordId=state.getString("pickRecordId","");}
+        if(state!=null){pickKind=state.getString("pickKind","attachment");pickRecordId=state.getString("pickRecordId","");imageExportId=state.getString("imageExportId","");}
         // Allow user-initiated system screenshots; never capture or upload the screen ourselves.
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         store = new Store();
@@ -160,6 +167,14 @@ public class MainActivity extends Activity {
     }
     private Object execute(String action,JSONObject p) throws Exception {
         switch(action) {
+            case "dismissEditorSelection": {runOnUiThread(()->{if(editorActionMode!=null)editorActionMode.finish();if(web!=null){web.clearFocus();InputMethodManager input=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);if(input!=null)input.hideSoftInputFromWindow(web.getWindowToken(),0);}});return true;}
+            case "saveImageSettings": {synchronized(this){JSONObject settings=privateSettings();settings.put("imageGeneration",ImageGeneration.configure(settings.optJSONObject("imageGeneration"),p.getJSONObject("settings")));encryptSettings(settings);return publicSettings();}}
+            case "createIllustration": return ImageGeneration.create(this,privateSettings().optJSONObject("imageGeneration"),p);
+            case "getIllustrationJobs": return ImageGeneration.jobs(this);
+            case "refreshIllustration": return ImageGeneration.refresh(this,privateSettings().optJSONObject("imageGeneration"),p.getString("id"));
+            case "ackIllustration": return ImageGeneration.acknowledge(this,p.getString("id"),p.optBoolean("confirmed"));
+            case "pendingRecordImage": {String value=getSharedPreferences("record-image-delivery",MODE_PRIVATE).getString("pending","");return value.isEmpty()?JSONObject.NULL:new JSONObject(value);}
+            case "ackRecordImage": {SharedPreferences prefs=getSharedPreferences("record-image-delivery",MODE_PRIVATE);String value=prefs.getString("pending","");if(!value.isEmpty()&&new JSONObject(value).optString("deliveryId").equals(p.optString("deliveryId")))prefs.edit().remove("pending").commit();return true;}
             case "init": {
                 JSONObject o=new JSONObject();o.put("records",store.records());JSONObject chat=ChatStore.get(store.getWritableDatabase(),this,null);o.put("messages",chat.getJSONArray("messages"));o.put("chatSession",chat.getJSONObject("session"));o.put("chatSessions",chat.getJSONArray("sessions"));o.put("wikiPages",store.wikiPages());o.put("wikiInsights",WikiInsightStore.get(store.getWritableDatabase()));o.put("settings",publicSettings());return o;
             }
@@ -171,6 +186,17 @@ public class MainActivity extends Activity {
             case "saveDocumentDraft": return DocumentDrafts.save(this,p.getJSONObject("draft"));
             case "clearDocumentDraft": return DocumentDrafts.clear(this,p.getString("id"));
             case "storeRecordImage": return RecordMedia.fromData(this,p.getString("data"),p.optString("name","图片"));
+            case "saveRecordImage": {
+                String imageId=p.getString("id");RecordImageExport.source(this,imageId);
+                if(!imageExportBusy.compareAndSet(false,true))throw new Exception("图片正在保存，请稍候");
+                try{
+                    if(android.os.Build.VERSION.SDK_INT>=29)return RecordImageExport.toGallery(this,imageId);
+                    if(!imageExportId.isEmpty())throw new Exception("请先完成或取消当前图片保存");
+                    imageExportId=imageId;String name=RecordImageExport.name(imageId);
+                    main.post(()->{try{Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("image/jpeg");intent.putExtra(Intent.EXTRA_TITLE,name);startActivityForResult(intent,EXPORT_IMAGE);}catch(Exception ex){imageExportId="";try{event("notice",new JSONObject().put("message","无法打开图片保存位置，请重试"));}catch(Exception ignored){}}});
+                    return new JSONObject().put("saved",false).put("message","请选择图片保存位置");
+                }finally{imageExportBusy.set(false);}
+            }
             case "saveDocument": return store.saveDocument(p.getJSONObject("record"),p.optBoolean("allowDuplicate"),p.isNull("expectedVersion")?null:p.getLong("expectedVersion"));
             case "saveWiki": return store.saveWiki(p.getJSONObject("page"));
             case "getWikiJob": return store.wikiJob(p.getString("id"));
@@ -184,6 +210,7 @@ public class MainActivity extends Activity {
             case "deleteWiki": store.getWritableDatabase().delete("wiki_pages","id=?",new String[]{p.getString("id")});return true;
             case "applyRecordAction": return store.applyAction(p);
             case "trackDay": {JSONObject day=tracks.day(p.getString("date"));day.put("status",trackingStatus());day.put("dates",tracks.dates());return day;}
+            case "trackTime": return TrackTime.query(tracks.day(p.getString("date"),TrackingService.prefs(this).getString("filterMode",TrackFusion.ID),false),p);
             case "trackRoadStatus": return RoadNetwork.info(this);
             case "trackRoadConfig": RoadNetwork.configure(this,p);return RoadNetwork.info(this);
             case "trackRoadMatch": return RoadNetwork.match(this,tracks.day(p.getString("date")));
@@ -374,7 +401,7 @@ public class MainActivity extends Activity {
         String[] parts=encrypted.split(":");Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Base64.decode(parts[0],Base64.NO_WRAP)));return new JSONObject(new String(c.doFinal(Base64.decode(parts[1],Base64.NO_WRAP)),StandardCharsets.UTF_8));
     }
     private void encryptSettings(JSONObject s)throws Exception{Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,key());String encrypted=Base64.encodeToString(c.getIV(),Base64.NO_WRAP)+":"+Base64.encodeToString(c.doFinal(s.toString().getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP);if(!getSharedPreferences("secure",MODE_PRIVATE).edit().putString("settings",encrypted).commit())throw new Exception("设置保存失败");}
-    private JSONObject publicSettings()throws Exception{JSONObject s=privateSettings();s.put("wikiAutomation",WikiAutomation.settings(this));s.remove("mapTileKey");JSONObject search=DeepSeekTools.settings(s);search.put("keyConfigured",!search.optString("apiKey").isEmpty());search.remove("apiKey");s.put("linkSearch",search);JSONObject profiles=s.optJSONObject("profiles");if(profiles!=null){java.util.Iterator<String> it=profiles.keys();while(it.hasNext()){JSONObject p=profiles.getJSONObject(it.next());p.put("keyConfigured",!p.optString("apiKey").isEmpty());p.remove("apiKey");}}return s;}
+    private JSONObject publicSettings()throws Exception{JSONObject s=privateSettings();s.put("imageGeneration",ImageGeneration.publicConfig(s.optJSONObject("imageGeneration")));s.put("wikiAutomation",WikiAutomation.settings(this));s.remove("mapTileKey");JSONObject search=DeepSeekTools.settings(s);search.put("keyConfigured",!search.optString("apiKey").isEmpty());search.remove("apiKey");s.put("linkSearch",search);JSONObject profiles=s.optJSONObject("profiles");if(profiles!=null){java.util.Iterator<String> it=profiles.keys();while(it.hasNext()){JSONObject p=profiles.getJSONObject(it.next());p.put("keyConfigured",!p.optString("apiKey").isEmpty());p.remove("apiKey");}}return s;}
 
     private JSONObject ask(JSONObject p) throws Exception {
         JSONObject settings=privateSettings(),profiles=settings.optJSONObject("profiles");String active=settings.optString("activeProfile");
@@ -383,20 +410,28 @@ public class MainActivity extends Activity {
         URL url=new URL(endpoint+(protocol.equals("responses")?"/responses":"/chat/completions"));
         ModelEndpoint.validate(url);
         JSONArray chat=p.getJSONArray("messages");JSONObject body=new JSONObject();body.put("model",profile.getString("model"));body.put("stream",false);
-        JSONObject tool=p.optJSONObject("tool");
+        JSONObject tool=p.optJSONObject("tool");boolean layout=tool!=null&&"plan_record_layout".equals(tool.optString("name"));
+        String reference=p.optString("illustrationReferenceId");
+        if(!reference.isEmpty()){
+            if(tool==null||!"prepare_record_illustration".equals(tool.optString("name")))throw new Exception("参考图片只用于笔记配图策划");
+            byte[] image=readBytes(new java.io.FileInputStream(RecordMedia.file(this,reference)),4*1024*1024);
+            JSONObject user=chat.getJSONObject(chat.length()-1);if(!"user".equals(user.optString("role")))throw new Exception("配图请求格式无效");
+            user.put("content",new JSONArray().put(new JSONObject().put("type","text").put("text",user.getString("content"))).put(new JSONObject().put("type","image_url").put("image_url",new JSONObject().put("url","data:image/jpeg;base64,"+Base64.encodeToString(image,Base64.NO_WRAP)))));
+        }
         String effort=profile.optString("effort","off");
         if(protocol.equals("responses")) {
             JSONArray input=new JSONArray();String instruction="";
             for(int i=0;i<chat.length();i++){JSONObject m=chat.getJSONObject(i);if(m.getString("role").equals("system")){instruction+=m.getString("content");continue;}
                 JSONObject out=new JSONObject();out.put("role",m.getString("role"));Object content=m.get("content");
                 if(content instanceof JSONArray){JSONArray items=new JSONArray();JSONArray parts=(JSONArray)content;for(int j=0;j<parts.length();j++){JSONObject part=parts.getJSONObject(j),item=new JSONObject();if(part.getString("type").equals("text")){item.put("type","input_text");item.put("text",part.getString("text"));}else{item.put("type","input_image");item.put("image_url",part.getJSONObject("image_url").getString("url"));}items.put(item);}out.put("content",items);}else out.put("content",content);input.put(out);
-            }body.put("instructions",instruction);body.put("input",input);body.put("store",false);body.put("max_output_tokens",4096);
+            }body.put("instructions",instruction);body.put("input",input);body.put("store",false);body.put("max_output_tokens",layout?8192:4096);
             if(!effort.equals("off")){JSONObject reasoning=new JSONObject();reasoning.put("effort",effort);body.put("reasoning",reasoning);}
-            if(tool!=null){JSONObject t=new JSONObject(tool.toString());t.put("type","function");body.put("tools",new JSONArray().put(t));body.put("tool_choice",profile.optString("id").equals("deepseek")&&effort.equals("off")?new JSONObject().put("type","function").put("name",tool.getString("name")):"auto");}
+            if(tool!=null){JSONObject t=new JSONObject(tool.toString());t.put("type","function");body.put("tools",new JSONArray().put(t));body.put("tool_choice",(layout||profile.optString("id").equals("deepseek"))&&effort.equals("off")?new JSONObject().put("type","function").put("name",tool.getString("name")):"auto");}
         } else {
-            body.put("messages",chat);body.put("max_tokens",4096);
-            if(tool!=null){JSONObject t=new JSONObject();t.put("type","function");t.put("function",tool);body.put("tools",new JSONArray().put(t));body.put("tool_choice",profile.optString("id").equals("deepseek")&&effort.equals("off")?new JSONObject().put("type","function").put("function",new JSONObject().put("name",tool.getString("name"))):"auto");}
-            if(profile.optString("id").equals("glm")){JSONObject thinking=new JSONObject();thinking.put("type",effort.equals("off")?"disabled":"enabled");body.put("thinking",thinking);}
+            body.put("messages",chat);body.put("max_tokens",layout?8192:4096);
+            if(tool!=null){JSONObject t=new JSONObject();t.put("type","function");t.put("function",tool);body.put("tools",new JSONArray().put(t));body.put("tool_choice",(layout||profile.optString("id").equals("deepseek"))&&effort.equals("off")?new JSONObject().put("type","function").put("function",new JSONObject().put("name",tool.getString("name"))):"auto");}
+            if(ModelEndpoint.bailian(url)){body.put("enable_thinking",!effort.equals("off"));}
+            else if(profile.optString("id").equals("glm")){JSONObject thinking=new JSONObject();thinking.put("type",effort.equals("off")?"disabled":"enabled");body.put("thinking",thinking);}
             else if(profile.optString("id").equals("deepseek")){body.put("thinking",new JSONObject().put("type",effort.equals("off")?"disabled":"enabled"));if(!effort.equals("off"))body.put("reasoning_effort",effort);}
             else if(!effort.equals("off"))body.put("reasoning_effort",effort);
         }
@@ -410,9 +445,10 @@ public class MainActivity extends Activity {
                 throw new Exception("模型请求失败（HTTP "+code+"）；请检查模型是否支持图片、输入长度与服务状态");
             }
             JSONObject response=new JSONObject(new String(readBytes(conn.getInputStream(),8*1024*1024),StandardCharsets.UTF_8));StringBuilder answer=new StringBuilder();
+            JSONArray choicesForStatus=response.optJSONArray("choices");if("incomplete".equals(response.optString("status"))||choicesForStatus!=null&&choicesForStatus.length()>0&&"length".equals(choicesForStatus.getJSONObject(0).optString("finish_reason")))throw new Exception("模型输出达到上限，结果不完整，请重试");
             if(protocol.equals("responses")){JSONArray outputs=response.optJSONArray("output");if(outputs!=null)for(int i=0;i<outputs.length();i++){JSONObject output=outputs.getJSONObject(i);if("function_call".equals(output.optString("type"))&&(tool==null?"prepare_life_records":tool.optString("name")).equals(output.optString("name"))){answer.setLength(0);answer.append(output.getString("arguments"));break;}JSONArray parts=output.optJSONArray("content");if(parts!=null)for(int j=0;j<parts.length();j++)if("output_text".equals(parts.getJSONObject(j).optString("type")))answer.append(parts.getJSONObject(j).optString("text"));}}
             else{JSONArray choices=response.optJSONArray("choices");if(choices!=null&&choices.length()>0){JSONObject message=choices.getJSONObject(0).getJSONObject("message");JSONArray calls=message.optJSONArray("tool_calls");if(calls!=null){for(int i=0;i<calls.length();i++){JSONObject function=calls.getJSONObject(i).getJSONObject("function");if((tool==null?"prepare_life_records":tool.optString("name")).equals(function.optString("name"))){answer.append(function.getString("arguments"));break;}}}if(answer.length()==0)answer.append(message.optString("content", ""));}}
-            if(answer.length()==0)throw new Exception("模型未返回文本，请切换非推理模型或提高输出额度");
+            if(answer.toString().trim().isEmpty()||"null".equals(answer.toString().trim()))throw new Exception("模型未返回文本，请稍后重试或检查模型配置");
             JSONObject result=new JSONObject();result.put("text",answer.toString());result.put("model",profile.getString("model"));if(response.has("usage"))result.put("usage",response.get("usage"));return result;
         }finally{conn.disconnect();}
     }
@@ -423,6 +459,10 @@ public class MainActivity extends Activity {
         if(uri!=null)readAttachment(uri,"attachment");else{String text=intent.getStringExtra(Intent.EXTRA_TEXT);if(text!=null){try{JSONObject data=new JSONObject();data.put("kind","text");data.put("name","分享内容");data.put("text",text);event("attachment",data);}catch(Exception ignored){}}}
     }
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);
+        if(request==EXPORT_IMAGE){String imageId=imageExportId;imageExportId="";Uri destination=data==null?null:data.getData();
+            if(result!=RESULT_OK||destination==null){try{event("notice",new JSONObject().put("message","已取消图片保存"));}catch(Exception ignored){}return;}
+            tasks.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(destination,"wt")){RecordImageExport.write(this,imageId,out);event("notice",new JSONObject().put("message","图片已保存到所选位置"));}catch(Exception ex){try{event("notice",new JSONObject().put("message","图片保存失败："+cleanError(ex)));}catch(Exception ignored){}}});return;
+        }
         if(request==EXPORT_TRACK_FEEDBACK){Uri destination=data==null?null:data.getData();if(result!=RESULT_OK||destination==null){feedbackBusy.set(false);feedbackEvent("cancelled",0,0,"已取消导出");return;}if(!feedbackRunning.compareAndSet(false,true))return;feedbackBusy.set(true);
             feedbackEvent("writing",0,0,"正在导出全部定位…");tasks.execute(()->{try{
                 JSONObject report;try(TrackStore feedbackStore=new TrackStore(getApplicationContext());OutputStream out=getContentResolver().openOutputStream(destination,"wt")){
@@ -431,16 +471,17 @@ public class MainActivity extends Activity {
                 feedbackRunning.set(false);feedbackBusy.set(false);feedbackEvent("complete",report.getLong("totalRawPoints"),report.getLong("totalRawPoints"),"已保存全部定位："+report.getInt("dateCount")+" 个日期，"+report.getLong("totalRawPoints")+" 个点。请自行分享给信任的人。");
             }catch(Exception e){feedbackRunning.set(false);feedbackBusy.set(false);feedbackEvent("failed",0,0,"导出失败："+cleanError(e)+"；生成的文件可能不完整，请重试。");}finally{feedbackRunning.set(false);feedbackBusy.set(false);}});return;
         }
-        if(result!=RESULT_OK||data==null)return;Uri uri=data.getData();if(uri==null)return;
+        if(result!=RESULT_OK||data==null){if(request==PICK&&pickKind.equals("record-image"))try{event("recordImageCancelled",new JSONObject().put("recordId",pickRecordId));}catch(Exception ignored){}return;}final Uri uri=data.getData()!=null?data.getData():request==PICK&&data.getClipData()!=null&&data.getClipData().getItemCount()>0?data.getClipData().getItemAt(0).getUri():null;
+        if(uri==null){if(request==PICK)try{if(pickKind.equals("record-image"))event("recordImageCancelled",new JSONObject().put("recordId",pickRecordId));event("notice",new JSONObject().put("message","选图器未返回可读取的图片，请重新选择"));}catch(Exception ignored){}return;}
         if(request==PICK)readAttachment(uri,pickKind);
         if(request==PICK_ROADS){try{event("notice",new JSONObject().put("message","正在本机导入路网，完成前请保持App打开"));}catch(Exception ignored){}roadTasks.execute(()->{try{RoadNetwork.importFile(this,uri);event("offlineMap",new JSONObject().put("message","离线路网已导入；道路推断不改写原定位或里程"));}catch(Exception e){try{event("notice",new JSONObject().put("message","路网导入失败："+cleanError(e)));}catch(Exception ignored){}}});}
         if(request==PICK_MAP){tasks.execute(()->{try{OfflineMap.importFile(this,uri);event("offlineMap",new JSONObject().put("message","离线地图已导入，不影响轨迹记录"));}catch(Exception e){try{event("notice",new JSONObject().put("message","地图导入失败："+cleanError(e)));}catch(Exception ignored){}}});}
         if(request==EXPORT){tasks.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(uri)){out.write(exportBytes);JSONObject o=new JSONObject();o.put("message",exportLabel);event("notice",o);}catch(Exception e){try{JSONObject o=new JSONObject();o.put("message","导出失败："+cleanError(e));event("notice",o);}catch(Exception ignored){}}});}
     }
-    @Override protected void onSaveInstanceState(Bundle out){out.putString("pickKind",pickKind);out.putString("pickRecordId",pickRecordId);super.onSaveInstanceState(out);}
+    @Override protected void onSaveInstanceState(Bundle out){out.putString("pickKind",pickKind);out.putString("pickRecordId",pickRecordId);out.putString("imageExportId",imageExportId);super.onSaveInstanceState(out);}
     private void readAttachment(Uri uri,String kind){String recordId=pickRecordId;tasks.execute(()->{try{
         String name=uri.getLastPathSegment()==null?"附件":uri.getLastPathSegment();try(Cursor c=getContentResolver().query(uri,null,null,null,null)){if(c!=null&&c.moveToFirst()){int idx=c.getColumnIndex(OpenableColumns.DISPLAY_NAME);if(idx>=0)name=c.getString(idx);}}
-        if(kind.equals("record-image")){event("recordImage",RecordMedia.importImage(this,uri,name).put("recordId",recordId));return;}
+        if(kind.equals("record-image")){JSONObject image=RecordMedia.importImage(this,uri,name).put("recordId",recordId).put("deliveryId",java.util.UUID.randomUUID().toString());if(!getSharedPreferences("record-image-delivery",MODE_PRIVATE).edit().putString("pending",image.toString()).commit())throw new java.io.IOException("图片回传暂存失败，请重新选择");event("recordImage",image);return;}
         byte[] bytes=readBytes(getContentResolver().openInputStream(uri),kind.equals("backup")?192*1024*1024:FILE_LIMIT);String mime=getContentResolver().getType(uri);if(mime==null)mime="application/octet-stream";
         JSONObject o=new JSONObject();o.put("name",name);o.put("size",bytes.length);String lower=name.toLowerCase(Locale.ROOT);
         if(kind.equals("backup")){JSONObject b=new JSONObject(new String(bytes,StandardCharsets.UTF_8));if(!"quantlife".equals(b.optString("format"))||b.optInt("version")!=1)throw new Exception("这不是知时的数据备份");event("backup",b);return;}
@@ -456,5 +497,5 @@ public class MainActivity extends Activity {
         } else if(mime.startsWith("text/")||lower.matches(".*\\.(txt|md|csv|json|log)$")){o.put("kind","text");o.put("text",new String(bytes,StandardCharsets.UTF_8));}
         else throw new Exception("支持图片、TXT、Markdown、CSV、PDF 和 DOCX 文件");
         event("attachment",o);
-    }catch(Exception e){try{JSONObject o=new JSONObject();o.put("message",cleanError(e));event("notice",o);}catch(Exception ignored){}}});}
+    }catch(Exception e){try{if(kind.equals("record-image"))event("recordImageCancelled",new JSONObject().put("recordId",recordId));JSONObject o=new JSONObject();o.put("message",cleanError(e));event("notice",o);}catch(Exception ignored){}}});}
 }

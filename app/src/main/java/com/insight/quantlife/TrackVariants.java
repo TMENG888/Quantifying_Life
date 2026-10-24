@@ -3,16 +3,20 @@ package com.insight.quantlife;
 import java.util.*;
 import com.insight.quantlife.TrackFilter.Point;
 
-/** Historical D baseline for comparison. Never changes stored coordinates. */
+/** D policy: GPS-only weighted smoothing plus independently evidenced dwell suppression.
+ * Never changes stored coordinates; missing sensors preserve the historical D behavior. */
 public final class TrackVariants {
     public static final String ID="weighted65", LABEL="65米＋误差加权平滑", COLOR="#b47719";
     public static final double MAX_ACCURACY=65;
     public static boolean connected(Point a,Point b){return a.session.equals(b.session)&&!b.breakBefore&&b.time>a.time&&b.time-a.time<=TrackFilter.GAP&&TrackFilter.distance(a,b)/((b.time-a.time)/1000.0)<=TrackFilter.MAX_SPEED;}
-    public static List<Point> apply(List<Point> raw){return weighted(light(raw));}
+    public static List<Point> apply(List<Point> raw){return weighted(TrackDwell.apply(light(raw)));}
     static List<Point> light(List<Point> raw){
         List<Point> ordered=new ArrayList<>();for(Point p:raw)if(p!=null)ordered.add(p);ordered.sort(Comparator.comparingLong(p->p.time));
-        List<Point> valid=new ArrayList<>();int missing=0;
-        for(Point p:ordered){if(!TrackFilter.valid(p,MAX_ACCURACY,2)){missing++;continue;}Point q=p.copy();q.reportedAccuracy=p.accuracy;q.reportedSpeed=p.speed;if(missing>=2)q.breakBefore=true;valid.add(q);missing=0;}
+        List<Point> valid=new ArrayList<>();
+        // Callback counts do not measure a time gap. Excluded Fused, stale or poor
+        // GPS callbacks must not split otherwise continuous accepted observations.
+        // Real time gaps, sessions, explicit breaks and impossible hops still cut.
+        for(Point p:ordered){if(p.mocked||!TrackFilter.valid(p,MAX_ACCURACY,2))continue;Point q=p.copy();q.reportedAccuracy=p.accuracy;q.reportedSpeed=p.speed;valid.add(q);}
         List<Point> out=new ArrayList<>();
         for(int i=0;i<valid.size();i++){
             Point p=valid.get(i),a=out.isEmpty()?null:out.get(out.size()-1),b=i+1<valid.size()?valid.get(i+1):null;
@@ -34,7 +38,7 @@ public final class TrackVariants {
             Point p=points.get(i),q=p.copy();
             if(i>0&&i+1<points.size()){
                 Point a=points.get(i-1),b=points.get(i+1);double path=TrackFilter.distance(a,p)+TrackFilter.distance(p,b),direct=TrackFilter.distance(a,b);
-                if(connected(a,p)&&connected(p,b)&&b.time-a.time<=30000&&path>0&&direct/path>=.92){
+                if(a.motionState.equals("unknown")&&p.motionState.equals("unknown")&&b.motionState.equals("unknown")&&connected(a,p)&&connected(p,b)&&b.time-a.time<=30000&&path>0&&direct/path>=.92){
                     double wa=1/(a.accuracy*a.accuracy),wp=2/(p.accuracy*p.accuracy),wb=1/(b.accuracy*b.accuracy),sum=wa+wp+wb;
                     // Wrapped longitudes avoid averaging +180 and -180 into zero.
                     q.lat=(wa*a.lat+wp*p.lat+wb*b.lat)/sum;q.lon=wrap(p.lon+(wa*delta(a.lon-p.lon)+wb*delta(b.lon-p.lon))/sum);

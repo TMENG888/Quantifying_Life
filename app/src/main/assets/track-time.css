@@ -1,0 +1,18 @@
+/* Time lookup inherits the app's green/cream tokens and system Chinese font. */
+.track-time{--muted:#56675e;margin:12px 0 20px;padding:12px;border:1px solid var(--line);border-radius:16px;background:var(--surface)}
+.track-time-tabs{display:flex;padding:4px;background:var(--soft);border-radius:12px;margin-bottom:12px}
+.track-time-tabs button{flex:1;min-width:0;min-height:48px;padding:10px 6px;background:transparent;color:var(--muted);font-size:15px;border-radius:9px}
+.track-time-tabs button[aria-pressed=true]{background:var(--green);color:#fff;font-weight:600}
+.track-time-tabs button+button{margin-left:8px}
+.track-time-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.track-time .field{min-width:0;margin:0 0 12px}
+.track-time .field span{font-size:13px;color:var(--muted)}
+.track-time input,.track-time select{width:100%;min-width:0;box-sizing:border-box;min-height:48px;font-size:16px;font-variant-numeric:tabular-nums}
+.track-time-actions{display:flex;align-items:flex-end;flex-wrap:wrap}
+.track-time-actions>.field{flex:1 1 140px;margin:0}
+.track-time-actions>button{flex:0 1 auto;min-height:48px;padding:12px 16px;font-size:15px;margin-left:12px}
+.track-time-status{margin:12px 0 0;font-size:13px;color:var(--green);line-height:1.65;overflow-wrap:anywhere}
+.track-time .chip{min-height:48px;white-space:normal;margin:8px 8px 0 0;text-align:left}
+.track-time button:focus-visible,.track-time input:focus-visible,.track-time select:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+.track-time button:active:not(:disabled){opacity:.8}
+@media(max-width:360px){.track-time{padding:10px}.track-time-actions>button{padding:12px;margin-left:8px}.track-time-fields{gap:8px}}

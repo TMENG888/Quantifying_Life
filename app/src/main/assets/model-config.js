@@ -12,5 +12,5 @@
   saving=true;const button=$('save-model');button.disabled=true;button.textContent='正在保存…';try{e.state.settings=await e.api('saveSettings',{settings:{profile:p,dailyLearningGoal:e.state.settings.dailyLearningGoal||60}});drafts={};selected=null;e.render();e.toast('模型配置已加密保存，可返回 AI 助手');}finally{saving=false;if(document.contains(button)){button.disabled=false;button.textContent='保存模型配置';}}
  }
  function leave(){remember();}
- root.ModelConfig={init:env=>{e=env;},page,bind,leave};
+ root.ModelConfig={init:env=>{e=env;},page:()=>{const html=page();return root.RecordIllustrator?html.replace('</section>',root.RecordIllustrator.configHTML(e.state.settings,e.esc)+'</section>'):html;},bind:()=>{bind();root.RecordIllustrator?.bindConfig();},leave};
 })(window);

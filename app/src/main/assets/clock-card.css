@@ -1,0 +1,11 @@
+.clock-candidate{padding:16px;margin:12px 0;border-radius:18px}
+.clock-card-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.clock-candidate .clock-card-heading h3{font-size:16px;margin:0;line-height:1.4}
+.clock-card-heading>span{font-size:12px;color:var(--muted)}
+.clock-card-time{display:flex;align-items:baseline;flex-wrap:wrap;margin:10px 0 16px;font-variant-numeric:tabular-nums}
+.clock-card-time strong{font-size:28px;line-height:1.2;font-weight:600;letter-spacing:.3px}
+.clock-card-time>span{font-size:13px;color:var(--muted);margin-left:14px}
+.clock-candidate .clock-card-context{font-size:12px;color:var(--muted);margin:-5px 0 12px;line-height:1.5;overflow-wrap:anywhere}
+.clock-candidate .actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.clock-candidate .actions button{font-size:14px;min-height:44px;padding:10px 8px}
+.clock-candidate .actions>button+button{margin-left:0}

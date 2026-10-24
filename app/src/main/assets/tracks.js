@@ -31,5 +31,7 @@
   // Separate, display-only inference. Never feeds summary(), segments(), or exports.
   function roadOverlays(value){return (Array.isArray(value?.routes)?value.routes:[]).filter(r=>r.inferred===true&&Number.isFinite(r.start)&&Number.isFinite(r.end)&&r.end>r.start&&Array.isArray(r.path)&&r.path.length>=2&&r.path.length<=20000&&r.path.every(p=>Number.isFinite(p.lat)&&Number.isFinite(p.lon)&&Math.abs(p.lat)<=85&&Math.abs(p.lon)<=180)).sort((a,b)=>a.start-b.start);}
   function roadCovered(a,b,routes){return b.time>a.time&&routes.some(r=>a.time>=r.start&&b.time<=r.end);}
-  const api={valid,distance,connected,segments,breaks,bridges,summary,project,fit,roadOverlays,roadCovered};if(typeof module==='object'&&module.exports)module.exports=api;else root.LifeTracks=api;
+  // Road geometry has no per-vertex time. Never pretend to clip a partial route.
+  function roadsInTime(value,selection){const roads=roadOverlays(value);if(!selection||selection.mode==='all')return roads;if(selection.mode!=='range')return [];return roads.filter(r=>r.start>=selection.start&&r.end<selection.end);}
+  const api={valid,distance,connected,segments,breaks,bridges,summary,project,fit,roadOverlays,roadCovered,roadsInTime};if(typeof module==='object'&&module.exports)module.exports=api;else root.LifeTracks=api;
 })(typeof window!=='undefined'?window:globalThis);

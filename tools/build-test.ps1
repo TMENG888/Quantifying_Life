@@ -1,4 +1,4 @@
-param([string]$BuildDir='E:\Codex\work\2026-10-19-zhishi-visual-editor\tests', [string]$AppBuildDir='E:\Codex\work\2026-10-19-zhishi-visual-editor\build')
+param([string]$BuildDir='E:\Codex\work\2026-10-24-track-reliability\tests', [string]$AppBuildDir='E:\Codex\work\2026-10-24-track-reliability\build')
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $javaDir=(Get-ChildItem (Join-Path $PSScriptRoot 'android/jdk') -Directory | Select-Object -First 1).FullName
