@@ -1,10 +1,13 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'">
-  <title>知时 · 生活记录</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="track-time.css"><link rel="stylesheet" href="document-editor.css"><link rel="stylesheet" href="record-illustrator.css"><script src="document-rich.js" defer></script>
+  <meta name="description" content="知时，本机记录学习、工作、随笔与生活轨迹。">
+  <link rel="stylesheet" href="tokens.css"><title>知时 · 生活记录</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="track-time.css"><link rel="stylesheet" href="document-editor.css"><link rel="stylesheet" href="record-illustrator.css"><link rel="stylesheet" href="meditation.css"><link rel="stylesheet" href="chat-message-actions.css"><script src="document-code.js"></script><script src="document-rich.js"></script>
   <script src="illustration-domain.js"></script><script src="record-illustrator.js"></script>
+  <link rel="stylesheet" href="track-photos.css">
+  <link rel="stylesheet" href="interaction.css">
 </head>
 <body>
   <div class="app">
@@ -12,15 +15,19 @@
 <link rel="stylesheet" href="clock-card.css">
     <main id="main" tabindex="-1"><div class="empty">正在打开你的本地记录…</div></main>
     <nav class="bottom-nav" aria-label="主导航">
-      <button data-page="today" class="active"><span>◷</span>今日</button>
-      <button data-page="records"><span>▤</span>记录</button>
-      <button data-page="tracks"><span>⌁</span>轨迹</button>
-      <button data-page="chat"><span>✳</span>AI 助手</button>
+      <button data-page="today" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>今日</button>
+      <button data-page="records"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h14v16H5zM9 8h6M9 12h6M9 16h4"/></svg>记录</button>
+      <button data-page="tracks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l5-2 6 2 5-2v14l-5 2-6-2-5 2zM9 4v14M15 6v14"/></svg>轨迹</button>
+      <button data-page="chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 1-8 8H4l1-5a8 8 0 1 1 15-3zM8 10h8M8 14h5"/></svg>AI 助手</button>
     </nav>
   </div>
   <dialog id="editor"><div id="editor-content"></div></dialog>
   <dialog id="confirm-dialog"><div class="dialog-body"><h2 id="confirm-title"></h2><p id="confirm-message"></p><div class="actions"><button id="confirm-cancel" class="secondary">取消</button><button id="confirm-ok" class="primary">确认</button></div></div></dialog>
   <div id="toast" role="status" aria-live="polite"></div>
-  <script src="document-domain.js"></script><script src="domain.js"></script><script src="work-facts.js"></script><script src="wiki.js"></script><script src="wiki-compiler.js"></script><script src="wiki-insights.js"></script><script src="wiki-insights-ui.js"></script><script src="links.js"></script><script src="conversation.js"></script><script src="chat-markdown.js"></script><script src="chat-memory.js"></script><script src="chat-ui.js"></script><script src="tracks.js"></script><script src="map-tiles.js"></script><script src="compatibility.js"></script><script src="vendor/pdf.min.js"></script><script src="track-ui.js"></script><script src="thoughts.js"></script><script src="work-notes.js"></script><script src="work-calendar.js"></script><script src="agent-actions.js"></script><script src="auto-wiki.js"></script><script src="model-config.js"></script><script src="document-layout.js"></script><script src="record-editor.js"></script><script src="app.js"></script>
+  <link rel="stylesheet" href="feishu-import.css"><script src="feishu-import.js"></script>
+  <script src="document-domain.js"></script><script src="domain.js"></script><script src="topic-stats.js"></script><script src="domain-stats.js"></script><script src="domain-dashboard.js"></script><script src="evidence-stats.js"></script><script src="information-stats.js"></script><script src="record-metrics.js"></script><script src="calendar-metrics.js"></script><script src="evidence-dashboard.js"></script><script src="usage-telemetry.js"></script><script src="usage-insights.js"></script><script src="analysis-export.js"></script><script src="topic-insights.js"></script><link rel="stylesheet" href="topic-insights.css"><link rel="stylesheet" href="analysis-export.css"><script src="meditation-ui.js"></script><script src="study-timer-preview.js"></script>
+<script src="study-timer.js"></script><script src="work-facts.js"></script><script src="wiki.js"></script><script src="wiki-compiler.js"></script><script src="wiki-insights.js"></script><script src="wiki-insights-ui.js"></script><script src="links.js"></script><script src="study-learning.js"></script><script src="conversation.js"></script><script src="chat-markdown.js"></script><script src="chat-memory.js"></script><script src="chat-message-actions.js"></script><script src="chat-ui.js"></script><script src="tracks.js"></script><script src="map-tiles.js"></script><script src="map-gestures.js"></script><script src="compatibility.js"></script><script src="vendor/pdf.min.js"></script><script src="track-ui.js"></script><script src="record-list.js"></script><script src="thoughts.js"></script><script src="work-notes.js"></script><script src="work-calendar.js"></script><script src="agent-actions.js"></script><script src="auto-wiki.js"></script><script src="model-config.js"></script><script src="document-layout.js"></script><link rel="stylesheet" href="rewrite-panel.css"><script src="selection-rewrite.js"></script><script src="rewrite-panel.js"></script><script src="record-rewrite.js"></script><script src="record-editor.js"></script><script src="goal-domain.js"></script><script src="goal-progress-swipe.js"></script><script src="goal-task-swipe.js"></script>
+  <script src="goal-tasks.js"></script><script src="goal-assistant.js"></script><script src="publication-ui.js"></script><script src="creation-ui.js"></script><script src="view-motion.js"></script><script src="view-runtime.js"></script><script src="app.js"></script>
+  <link rel="stylesheet" href="domain-dashboard.css"><link rel="stylesheet" href="app-ui.css"><link rel="stylesheet" href="study-timer.css"><link rel="stylesheet" href="evidence-dashboard.css"><link rel="stylesheet" href="record-metrics.css"><link rel="stylesheet" href="goal-tasks.css"><link rel="stylesheet" href="creation-ui.css"><link rel="stylesheet" href="chat-conversation.css">
 </body>
 </html>

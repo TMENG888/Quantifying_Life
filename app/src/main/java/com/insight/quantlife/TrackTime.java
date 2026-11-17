@@ -26,8 +26,8 @@ public final class TrackTime {
             for(int i=0;i<all.length();i++){JSONObject o=all.getJSONObject(i);long t=o.getLong("time");if(t<start||t>=end)continue;
                 Point p=new Point();p.time=t;p.lat=o.getDouble("lat");p.lon=o.getDouble("lon");p.accuracy=o.getDouble("accuracy");p.session=o.getString("session");p.breakBefore=o.optBoolean("breakBefore");p.motionState=o.optString("motionState","");points.add(p);originals.put(p,o);
             }
-            List<Point> display=TrackDisplay.simplify(points);for(Point p:display)shown.put(originals.get(p));
-            out.put("start",start).put("end",end).put("processedPoints",points.size()).put("estimatedMeters",Math.round(TrackVariants.meters(points))).put("processedGaps",TrackVariants.gaps(points)).put("displaySimplified",display.size()<points.size());
+            boolean raw=TrackRaw.ID.equals(day.getJSONObject("filter").optString("id"));List<Point> display=raw?points:TrackDisplay.simplify(points);for(Point p:display)shown.put(originals.get(p));
+            out.put("start",start).put("end",end).put("processedPoints",points.size()).put("estimatedMeters",Math.round(raw?TrackRaw.meters(points):TrackVariants.meters(points))).put("processedGaps",raw?TrackRaw.gaps(points):TrackVariants.gaps(points)).put("displaySimplified",display.size()<points.size());
         }else if(mode.equals("moment")){
             long target=time(date,request.getString("at"),false);JSONObject before=null,after=null,nearest=null;
             // Uncertain held coordinates must not become a confident historical location.

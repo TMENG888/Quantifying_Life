@@ -1,0 +1,19 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: xuanhuang (by request) · redesign: full · nav: four retained destinations · signature: field ledger · posture: committed · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E3 S4 R4 V3 · weakest: E, centralized legacy colors and spacing before responsive review */
+.chat-message.user .message-content{cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;touch-action:pan-y}
+.chat-message.user .message-content:focus{outline:none;box-shadow:none}
+.chat-keyboard-navigation .chat-message.user .message-content:focus{outline:2px solid var(--green);outline-offset:6px;border-radius:8px}
+.chat-message.user .message-content:active{opacity:.8}
+.chat-edit-banner{display:flex;align-items:center;justify-content:space-between;gap:var(--space-md);min-height:48px;border-bottom:1px solid var(--line);margin-bottom:var(--space-xs);color:var(--green);font-size:14px}.chat-edit-banner button{background:transparent;color:var(--ink);font-size:24px;min-width:48px;min-height:48px}
+dialog.chat-message-menu{position:fixed;margin:0;padding:var(--space-2xs) 0;width:220px;max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);border:1px solid var(--line);border-radius:18px;background:var(--surface);color:var(--ink);box-shadow:0 8px 32px var(--color-shadow);overflow:auto}
+dialog.chat-message-menu::backdrop{background:var(--color-scrim-soft)}
+dialog.chat-message-menu>button{display:flex;align-items:center;gap:var(--space-md);width:100%;min-height:52px;padding:var(--space-sm) var(--space-md);background:transparent;color:var(--ink);font-size:16px;text-align:left;border-radius:0}
+dialog.chat-message-menu>button+button{border-top:1px solid var(--line)}
+dialog.chat-message-menu svg{width:22px;height:22px;flex:none}
+dialog.chat-message-menu>button:active,.chat-edit-banner button:active,.chat-menu-close:active{background:var(--soft)}
+dialog.chat-message-menu.selecting{inset:auto 0 0;margin-inline:auto;width:100%;max-width:760px;height:min(52dvh,640px);min-height:min(300px,calc(100dvh - 24px));max-height:calc(100dvh - 24px);padding:0;border:0;border-radius:24px 24px 0 0;overflow:hidden;box-shadow:0 -8px 32px var(--color-shadow)}
+dialog.chat-message-menu header{display:grid;grid-template-columns:48px minmax(0,1fr) 48px;align-items:center;gap:var(--space-xs);min-height:72px;padding:var(--space-xs) var(--space-md)}
+dialog.chat-message-menu header strong{grid-column:2;text-align:center;font-size:18px;font-weight:600}
+.chat-menu-close{display:grid;place-items:center;min-width:48px;min-height:48px;border-radius:50%;background:var(--bg);color:var(--ink)}
+.chat-select-scroll{height:calc(100% - 72px);padding:var(--space-xs) var(--space-lg) max(var(--space-lg),env(safe-area-inset-bottom));overflow:auto;overscroll-behavior:contain}
+#chat-select-text{max-width:680px;margin-inline:auto;font-size:17px;line-height:1.8;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text;cursor:text;touch-action:pan-y}

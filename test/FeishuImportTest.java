@@ -1,0 +1,57 @@
+package com.insight.quantlife.tests;
+import android.app.*;import android.os.*;import org.json.*;import com.insight.quantlife.*;
+import java.io.*;
+
+/** Public supplied document only; other fixtures synthetic. Never uses a model API. */
+public class FeishuImportTest extends DocumentEditorTest {
+ String URL="",documentId="";
+ @Override public void onCreate(Bundle b){URL=b==null?"":b.getString("docUrl","");documentId=android.net.Uri.parse(URL).getLastPathSegment();super.onCreate(b);}
+ JSONObject block(String type,String text,JSONArray children)throws Exception{return new JSONObject().put("data",new JSONObject().put("type",type).put("text",new JSONObject().put("initialAttributedTexts",new JSONObject().put("text",new JSONObject().put("0",text)))) .put("children",children));}
+ JSONObject fixture(String note)throws Exception{String id="SyntheticFeishuDocumentA";return new JSONObject().put("data",new JSONObject().put("id",id).put("has_more",false).put("block_map",new JSONObject().put(id,block("page","合成飞书学习笔记",new JSONArray().put("child"))).put("child",block("text",note,new JSONArray()))));}
+ JSONObject stage(String note)throws Exception{return FeishuImport.stage(getTargetContext(),FeishuImport.parse(fixture(note),"https://a.feishu.cn/docx/SyntheticFeishuDocumentA"),false);}
+ JSONObject pending()throws Exception{return (JSONObject)h.call("feishuPending",new JSONObject());}
+ JSONObject commit(JSONObject s,JSONObject existing,boolean copy)throws Exception{return (JSONObject)h.call("feishuCommit",new JSONObject().put("ticket",s.getString("ticket")).put("date","2026-10-27").put("durationMinutes",25).put("acknowledge",true).put("copy",copy).put("expectedId",existing==null?"":existing.getString("id")).put("expectedVersion",existing==null?0:existing.getLong("updatedAt")));}
+ void rejects(JSONObject p,String label)throws Exception{boolean rejected=false;try{FeishuImport.parse(p,"https://a.feishu.cn/docx/SyntheticFeishuDocumentA");}catch(Exception ex){rejected=true;}check(rejected,label);}
+ @Override public void onStart(){Bundle result=new Bundle();try{
+  if(!Build.HARDWARE.matches("ranchu|goldfish"))throw new Exception("Live import cleanup is restricted to a disposable Android emulator");
+  if(URL.isEmpty()||documentId==null)throw new Exception("Live document URL required via instrumentation -e docUrl; never store personal links in source fixtures");
+  h=new MainHost(this);h.open();h.js("AutoWiki.kick=()=>{};AutoWiki.resume=()=>{}");
+  JSONArray old=records();for(int i=0;i<old.length();i++){JSONObject r=old.getJSONObject(i);JSONObject meta=r.optJSONObject("feishuSource");if(meta==null)meta=r.optJSONObject("feishuCopy");if(meta!=null&&(meta.optString("documentId").equals("SyntheticFeishuDocumentA")||meta.optString("documentId").equals(documentId)))h.call("applyRecordAction",new JSONObject().put("kind","delete").put("recordId",r.getString("id")).put("expectedVersion",r.getLong("updatedAt")));}
+  // Parser refuses partial, missing and unrelated documents instead of creating empty notes.
+  JSONObject p=fixture("原文保留");p.getJSONObject("data").put("has_more",true);rejects(p,"Reject paginated partial document");
+  p=fixture("原文保留");p.getJSONObject("data").getJSONObject("block_map").remove("child");rejects(p,"Reject missing content block");
+  p=fixture("原文保留");p.getJSONObject("data").getJSONObject("block_map").getJSONObject("child").getJSONObject("data").put("children",new JSONArray().put("child"));rejects(p,"Reject cyclic content structure");
+  boolean login=false;try{FeishuImport.fromHtml("<html><title>登录飞书</title></html>",URL);}catch(Exception ex){login=true;}check(login,"Login page cannot become a learning note");
+  p=fixture("加粗测试");JSONObject rich=p.getJSONObject("data").getJSONObject("block_map").getJSONObject("child").getJSONObject("data").getJSONObject("text");rich.put("apool",new JSONObject().put("numToAttrib",new JSONObject().put("10",new JSONArray().put("bold").put("true"))));rich.getJSONObject("initialAttributedTexts").put("attribs",new JSONObject().put("0","*a+4"));check(FeishuImport.parse(p,"https://a.feishu.cn/docx/SyntheticFeishuDocumentA").getString("note").equals("**加粗测试**"),"Base36 rich-text attributes preserve original bold formatting");
+  JSONObject oldTicket=stage("旧预览"),newTicket=stage("新预览");boolean expired=false;try{commit(oldTicket,null,false);}catch(Exception ex){expired=true;}check(expired,"Replaced preview ticket cannot write stale content");FeishuImport.clear(getTargetContext(),newTicket.getString("ticket"));
+  p=fixture("正文及缺失图片");JSONObject map=p.getJSONObject("data").getJSONObject("block_map");map.getJSONObject("SyntheticFeishuDocumentA").getJSONObject("data").getJSONArray("children").put("missing-image");map.put("missing-image",new JSONObject().put("data",new JSONObject().put("type","image")));JSONObject missing=FeishuImport.stage(getTargetContext(),FeishuImport.parse(p,"https://a.feishu.cn/docx/SyntheticFeishuDocumentA"),false);check(missing.getJSONArray("warnings").length()>0&&missing.getString("note").contains("图片未导入"),"Unavailable image produces explicit placeholder and warning");boolean ack=false;try{h.call("feishuCommit",new JSONObject().put("ticket",missing.getString("ticket")));}catch(Exception ex){ack=true;}check(ack,"Cannot save incomplete-image preview without acknowledgement");FeishuImport.clear(getTargetContext(),missing.getString("ticket"));
+  StringBuilder longNote=new StringBuilder();for(int i=0;i<1600;i++)longNote.append("正文不能截断。第").append(i).append("行\n");longNote.append("全文末尾校验");
+  JSONObject s=stage(longNote.toString()),saved=commit(s,null,false).getJSONObject("record");check(saved.getString("note").endsWith("全文末尾校验")&&saved.getString("note").length()>6000,"Full original beyond 6000 characters retained");
+  String id=saved.getString("id");JSONObject retry=commit(s,null,false);check(retry.getBoolean("unchanged")&&retry.getJSONObject("record").getString("id").equals(id),"Lost-reply retry is idempotent");
+  // Preserve date, duration, tags on a clean source update.
+  saved.put("date","2026-10-01").put("durationMinutes",47).put("tags",new JSONArray().put("用户标签"));saved=(JSONObject)h.call("saveDocument",new JSONObject().put("record",saved).put("allowDuplicate",true).put("expectedVersion",saved.getLong("updatedAt")));
+  s=stage("飞书新版本正文");JSONObject preview=pending();check(!preview.getBoolean("localChanged"),"Local time and tags do not create false body conflict");
+  JSONObject updated=commit(s,saved,false).getJSONObject("record");check(updated.getString("date").equals("2026-10-01")&&updated.getInt("durationMinutes")==47&&updated.getJSONArray("tags").getString(0).equals("用户标签"),"Source update preserves local learning date duration tags");
+  JSONObject stale=new JSONObject(updated.toString());updated.put("note","本机编辑，绝不覆盖");updated=(JSONObject)h.call("saveDocument",new JSONObject().put("record",updated).put("allowDuplicate",true).put("expectedVersion",updated.getLong("updatedAt")));
+  s=stage("第三版飞书正文");check(pending().getBoolean("localChanged"),"Detect local body edits");boolean conflict=false;try{commit(s,stale,false);}catch(Exception ex){conflict=true;}check(conflict&&record(id).getString("note").equals("本机编辑，绝不覆盖"),"Stale update does not overwrite local text");
+  conflict=false;try{commit(s,updated,false);}catch(Exception ex){conflict=true;}check(conflict,"Even current version cannot silently overwrite local edits");
+  JSONObject copy=commit(s,updated,true).getJSONObject("record");check(!copy.getString("id").equals(id)&&record(id).getString("note").equals("本机编辑，绝不覆盖"),"Explicit copy keeps original intact");check(commit(s,updated,true).getJSONObject("record").getString("id").equals(copy.getString("id")),"Copy retry also idempotent");
+  FeishuImport.clear(getTargetContext(),s.getString("ticket"));
+  // Existing native image processing produces offline, EXIF-stripped local media.
+  JSONObject image=(JSONObject)h.call("storeRecordImage",new JSONObject().put("data",image()).put("name","合成图片"));s=stage("图片预览测试");s.put("note","图片前文\n\n![合成图片](zhishi-media:"+image.getString("id")+")\n\n图片后文").put("images",new JSONArray().put(image));
+  h.js("FeishuUI.preview("+s.toString()+")");until("!!document.querySelector('#feishu-dialog[open]')");check(h.js("document.querySelector('.feishu-original img').src.startsWith('https://appassets.androidplatform.net/record-media/')").equals("true"),"Preview images load only from local app assets");
+  h.js("FeishuUI.close()");
+  // Public, user-supplied real document over Android's own HTTPS stack.
+  JSONObject live=(JSONObject)h.call("feishuRead",new JSONObject().put("url",URL+"?from=from_copylink"));
+  check(live.getString("title").equals("Scrapy项目框架"),"Actual shared document title fetched without desktop login");check(live.getString("documentCreatedDate").equals("2025-05-12"),"Real first document creation date is read from its metadata");check(live.getString("note").contains("scrapy")&&live.getString("note").contains("关键词")&&live.getString("note").contains("笔记栏"),"Actual original text and column order present");
+  h.js("document.querySelector('[data-page=chat]').click();FeishuUI.preview("+live.toString()+")");until("!!document.querySelector('#feishu-save')");Thread.sleep(700);h.screenshot("feishu-real-preview.png");
+  click("#feishu-save");until("!document.querySelector('#feishu-error').hidden");check(h.js("document.querySelector('#feishu-error').textContent.includes('勾选')").equals("true"),"Transformation warnings require explicit acknowledgement");
+  h.js("document.querySelector('#feishu-ack').checked=true;document.querySelector('#feishu-minutes').value=35;document.querySelector('#feishu-save').click()");until("document.querySelector('#editor').open && !!document.querySelector('#doc-read') && !document.querySelector('#doc-read').hidden");
+  JSONObject actual=null;for(int i=0;i<records().length();i++){JSONObject r=records().getJSONObject(i);if(r.optString("title").equals("Scrapy项目框架"))actual=r;}check(actual!=null&&actual.getInt("durationMinutes")==35&&actual.getString("note").equals(live.getString("note")),"Real UI confirmation saves exact original and chosen duration");check(actual.getString("date").equals("2025-05-12"),"Real first note is saved on source creation date, not import date");Thread.sleep(700);h.screenshot("feishu-imported-reader.png");
+  // Safe parser metadata means credentials/user maps never enter persisted record.
+  check(!actual.toString().contains("user_map")&&!actual.toString().contains("Cookie"),"Only document snapshot metadata saved, no browser credentials");
+  boolean queued;try(android.database.sqlite.SQLiteDatabase db=android.database.sqlite.SQLiteDatabase.openDatabase(getTargetContext().getDatabasePath("quantlife.db").getPath(),null,android.database.sqlite.SQLiteDatabase.OPEN_READONLY);android.database.Cursor cursor=db.rawQuery("SELECT id FROM wiki_queue WHERE id=?",new String[]{actual.getString("id")})){queued=cursor.moveToFirst();}check(queued,"Imported learning note is enqueued for existing Wiki automation");
+  FeishuImport.clear(getTargetContext(),live.getString("ticket"));
+  result.putString("stream","PASS Feishu import "+passed+" checks.\n");finish(Activity.RESULT_OK,result);
+ }catch(Throwable ex){StringBuilder cause=new StringBuilder();for(Throwable t=ex;t!=null;t=t.getCause())cause.append(t.toString()).append('\n');result.putString("stream","FAIL Feishu import: "+cause+android.util.Log.getStackTraceString(ex));finish(Activity.RESULT_CANCELED,result);}}
+}

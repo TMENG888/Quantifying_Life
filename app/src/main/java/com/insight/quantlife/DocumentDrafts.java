@@ -6,5 +6,7 @@ public final class DocumentDrafts {
  public static synchronized Object get(Context c)throws Exception{JSONArray out=new JSONArray();try(SQLiteDatabase db=open(c);Cursor cursor=db.rawQuery("SELECT payload FROM drafts ORDER BY rowid DESC",null)){while(cursor.moveToNext())out.put(new JSONObject(cursor.getString(0)));}return out;}
  public static synchronized boolean save(Context c,JSONObject draft)throws Exception{String id=draft.getJSONObject("record").getString("id");if(id.isEmpty()||id.length()>100)throw new Exception("草稿编号无效");try(SQLiteDatabase db=open(c)){ContentValues v=new ContentValues();v.put("id",id);v.put("payload",draft.toString());return db.insertWithOnConflict("drafts",null,v,SQLiteDatabase.CONFLICT_REPLACE)>=0;}}
  public static synchronized boolean clear(Context c,String id){try(SQLiteDatabase db=open(c)){db.delete("drafts","id=?",new String[]{id});return true;}}
+ /** Seed once: retrying stopwatch delivery must never overwrite an edited draft. */
+ public static synchronized JSONObject seed(Context c,JSONObject record)throws Exception{String id=record.getString("id");try(SQLiteDatabase db=open(c);Cursor cursor=db.rawQuery("SELECT payload FROM drafts WHERE id=?",new String[]{id})){if(cursor.moveToFirst())return new JSONObject(cursor.getString(0));}JSONObject draft=new JSONObject().put("record",record).put("expectedVersion",JSONObject.NULL).put("caret",0).put("savedAt",System.currentTimeMillis()).put("metadataOnly",true).put("studySeed",true);save(c,draft);return draft;}
  private DocumentDrafts(){}
 }

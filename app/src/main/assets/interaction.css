@@ -1,0 +1,32 @@
+/* Touch feedback is independent from keyboard navigation and text selection. */
+* { -webkit-tap-highlight-color: transparent; }
+html[data-input-mode="pointer"] :is(button,a,input,textarea,select,summary,[role="button"],[tabindex]):focus,
+html[data-input-mode="pointer"] :is(button,a,input,textarea,select,summary,[role="button"],[tabindex]):focus-visible {
+  outline: none !important;
+}
+html[data-input-mode="keyboard"] :is(button,a,input,textarea,select,summary,[role="button"],[tabindex]):focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+html[data-input-mode="pointer"] :is(input,textarea,select):focus { box-shadow: none; }
+html[data-input-mode="pointer"] .primary:hover:not(:disabled) { background:var(--color-field); color:var(--color-field-ink); }
+/* Background/opacity only: a press never moves a row or changes its size. */
+:is(button,a,summary,[role="button"])[data-ui-pressed] {
+  opacity: .72 !important;
+  transition: opacity 70ms ease-out;
+}
+.bottom-nav [data-ui-pressed] { background-color: var(--soft); }
+[data-ui-exiting]{pointer-events:none!important}
+.goal-check>span{transition:background-color 130ms ease,border-color 130ms ease}
+.goal-check[aria-checked=true]>span::after{animation:goal-check-in 150ms ease-out}
+@keyframes goal-check-in{from{opacity:0;transform:rotate(45deg) scale(.6)}to{opacity:1;transform:rotate(45deg) scale(1)}}
+/* Both directions interpolate; releasing a finger no longer snaps opacity back. */
+:is(button,a,summary,[role="button"]){transition:opacity 110ms ease-out,background-color 140ms ease-out}
+dialog[open]:not(.document-dialog){animation:dialog-appear 160ms cubic-bezier(.2,.75,.25,1)}
+@keyframes dialog-appear{from{opacity:.6;transform:translateY(8px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
+#main { overflow-anchor: none; }
+@media (prefers-reduced-motion: reduce) {
+  [data-ui-pressed] { transition: none !important; }
+  .goal-check>span,.goal-check>span::after{transition:none!important;animation:none!important}
+  dialog[open]{animation:none!important}
+}

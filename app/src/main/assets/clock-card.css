@@ -1,11 +1,13 @@
-.clock-candidate{padding:16px;margin:12px 0;border-radius:18px}
-.clock-card-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: xuanhuang (by request) · redesign: full · nav: four retained destinations · signature: field ledger · posture: committed · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E3 S4 R4 V3 · weakest: E, centralized legacy colors and spacing before responsive review */
+.clock-candidate{padding:var(--space-md);margin:var(--space-sm) 0;border-radius:18px}
+.clock-card-heading{display:flex;align-items:center;justify-content:space-between;gap:var(--space-sm)}
 .clock-candidate .clock-card-heading h3{font-size:16px;margin:0;line-height:1.4}
 .clock-card-heading>span{font-size:12px;color:var(--muted)}
-.clock-card-time{display:flex;align-items:baseline;flex-wrap:wrap;margin:10px 0 16px;font-variant-numeric:tabular-nums}
-.clock-card-time strong{font-size:28px;line-height:1.2;font-weight:600;letter-spacing:.3px}
-.clock-card-time>span{font-size:13px;color:var(--muted);margin-left:14px}
-.clock-candidate .clock-card-context{font-size:12px;color:var(--muted);margin:-5px 0 12px;line-height:1.5;overflow-wrap:anywhere}
-.clock-candidate .actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}
-.clock-candidate .actions button{font-size:14px;min-height:44px;padding:10px 8px}
+.clock-card-time{display:flex;align-items:baseline;flex-wrap:wrap;margin:var(--space-xs) 0 var(--space-md);font-variant-numeric:tabular-nums}
+.clock-card-time strong{font-size:28px;line-height:1.2;font-weight:600;letter-spacing:0}
+.clock-card-time>span{font-size:13px;color:var(--muted);margin-left:var(--space-sm)}
+.clock-candidate .clock-card-context{font-size:12px;color:var(--muted);margin:calc(-1 * var(--space-2xs)) 0 var(--space-sm);line-height:1.5;overflow-wrap:anywhere}
+.clock-candidate .actions{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-xs)}
+.clock-candidate .actions button{font-size:14px;min-height:44px;padding:var(--space-xs) var(--space-xs)}
 .clock-candidate .actions>button+button{margin-left:0}

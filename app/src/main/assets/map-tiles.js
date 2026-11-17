@@ -1,8 +1,8 @@
 (function(root){
   'use strict';
   function visible(view,width,height){
-    const tiles=[],left=view.x-width/2,top=view.y-height/2,n=2**view.z;
-    for(let x=Math.floor(left/256);x<=Math.ceil((left+width)/256)-1;x++)for(let y=Math.floor(top/256);y<=Math.ceil((top+height)/256)-1;y++)if(y>=0&&y<n)tiles.push({z:view.z,x:((x%n)+n)%n,y,px:x*256-left,py:y*256-top});
+    const z=Math.floor(view.z),scale=2**(view.z-z),size=256*scale,tiles=[],left=view.x-width/2,top=view.y-height/2,n=2**z;
+    for(let x=Math.floor(left/size);x<=Math.ceil((left+width)/size)-1;x++)for(let y=Math.floor(top/size);y<=Math.ceil((top+height)/size)-1;y++)if(y>=0&&y<n)tiles.push({z,x:((x%n)+n)%n,y,px:x*size-left,py:y*size-top,size});
     return tiles;
   }
   function crop(tile,source,width=256,height=256){

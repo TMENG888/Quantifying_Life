@@ -15,7 +15,7 @@ test('draft excerpts remove Markdown and image IDs without joining English words
  assert.equal(R.plain('hello world'),'helloworld','lossless AI guard retains its original contract');
 });
 test('bare requests open editors but content and questions never silently navigate',()=>{
- for(const [s,t] of [['我想记录一条学习记录','learning'],['请帮我记录一篇学习笔记','learning'],['打开工作日志','work_note'],['我要写一条经验','experience'],['添加一个灵感创意','idea']])assert.equal(R.openIntent(s),t,s);
+ for(const [s,t] of [['我想记录一条学习记录','learning'],['请帮我记录一篇学习笔记','learning'],['打开工作日志','work_note'],['我要写一条经验','idea'],['写随笔','idea'],['添加一个灵感创意','idea']])assert.equal(R.openIntent(s),t,s);
  for(const s of ['我今天学习了Python，笔记是列表推导式','我想记录一条学习记录：今天读了数据库','我的工作记录在哪里？','我现在上班','记录学习了什么'])assert.equal(R.openIntent(s),null,s);
 });
 test('body mandatory, local pictures cannot substitute for text; attachments stay addressable',()=>{

@@ -1,6 +1,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.insight.quantlife.tests">
+  <instrumentation android:name="com.insight.quantlife.tests.MotionUiTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.GoalChecklistTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.CodeReaderTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.PublicationLibraryTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ReaderTaskRegressionTest" android:targetPackage="com.insight.quantlife" />
   <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+  <instrumentation android:name="com.insight.quantlife.tests.SelectionRewriteTest" android:targetPackage="com.insight.quantlife" />
   <application android:label="QuantLife local smoke tests" />
+  <instrumentation android:name="com.insight.quantlife.tests.StudyLearningUiTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.WikiClassificationTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.WikiFormatTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ChatMessageActionsTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.MeditationMapPhotosTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.MeditationDeleteTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.TrackReliabilityTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.TrackTimeTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.ChatScrollTest" android:targetPackage="com.insight.quantlife" />
@@ -16,6 +28,8 @@
   <instrumentation android:name="com.insight.quantlife.tests.ReaderSaveTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.ReaderSaveSafetyTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.ReaderNativeTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ReaderClippingTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.FeishuDateTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.SelectionDismissTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.GalleryColdStartTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.IllustrationLiveTest" android:targetPackage="com.insight.quantlife" />
@@ -84,4 +98,32 @@
   <instrumentation android:name="com.insight.quantlife.tests.TrackFeedbackTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.DeepSeekToolsTest" android:targetPackage="com.insight.quantlife" />
   <instrumentation android:name="com.insight.quantlife.tests.BeforeDeepSeekUpgradeTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.FeishuImportTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.FeishuUiTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.FeishuSecondDocumentTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.TopicInsightsTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.WikiDashboardLayoutTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.EverydayUiTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.StudyTimerTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.StudyTimerRecoveryTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.StudyTimerLayoutTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.AnalysisExportTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.AnalysisExportUiTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.EvidenceDashboardTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.QwenLabelingTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.InformationUnitsTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.InformationUiTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.CalendarMetricsTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.GoalTaskStoreTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.GoalTasksUiTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.GoalProgressDeleteTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.GoalProgressEditTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.GoalRollupUiTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.CreationStoreTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.CreationUiTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ChatComposerLayoutTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ChatInputStabilityTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.ChatPresentationTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.RawTrackTest" android:targetPackage="com.insight.quantlife" />
+  <instrumentation android:name="com.insight.quantlife.tests.InteractionUiTest" android:targetPackage="com.insight.quantlife" />
 </manifest>

@@ -9,8 +9,8 @@ public class TrackReliabilityTest extends Instrumentation {
     Location fix(long time,double meters,String provider,float speed){Location l=BeforeGapFixTest.p(time,meters,speed);l.setProvider(provider);return l;}
     JSONObject evidence(boolean moving)throws Exception{return new JSONObject().put("eligible",true).put("motionRms",moving?.5:.02).put("motionAgeMs",20).put("fixAgeMs",15).put("gpsAgeMs",0);}
     @Override public void onStart(){Bundle result=new Bundle();String settings=getTargetContext().getSharedPreferences("secure",0).getString("settings",null);int code=Activity.RESULT_CANCELED;
-        try{getTargetContext().getSharedPreferences("secure",0).edit().remove("settings").commit();h=new MainHost(this);h.open();h.js("AutoWiki.pause();AutoWiki.kick=()=>{}");
-            check(getTargetContext().getPackageManager().getPackageInfo(getTargetContext().getPackageName(),0).versionName.equals("1.13.1"),"Signed 1.13.1 cover upgrade is installed");
+        try{getTargetContext().getSharedPreferences("secure",0).edit().remove("settings").commit();h=new MainHost(this);h.open();h.js("AutoWiki.kick=()=>{}");
+            check(getTargetContext().getPackageManager().getPackageInfo(getTargetContext().getPackageName(),0).versionName.equals("1.14.2"),"Signed 1.14.2 cover upgrade is installed");
             h.call("trackConfig",new JSONObject().put("filterMode","weighted65").put("mapMode","offline").put("mapConsent",false));base=TrackStore.dayStart(date)+9*3600000;
             try(TrackStore db=new TrackStore(getTargetContext())){
                 JSONArray prior=db.diagnostics(date).getJSONArray("rawPoints");for(int i=0;i<prior.length();i++)if(!prior.getJSONObject(i).getString("session").equals(session))throw new Exception("Refuse to overwrite unrelated fixture date");if(prior.length()>0)db.deleteDay(date);

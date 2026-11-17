@@ -60,6 +60,10 @@ public class MainActivity extends Activity {
     @Override public void onActionModeStarted(ActionMode mode){super.onActionModeStarted(mode);editorActionMode=mode;}
     @Override public void onActionModeFinished(ActionMode mode){if(editorActionMode==mode)editorActionMode=null;super.onActionModeFinished(mode);}
     private Store store;
+    private PublicationLibrary publications;
+    private final java.util.concurrent.atomic.AtomicBoolean publicationImportBusy=new java.util.concurrent.atomic.AtomicBoolean();
+    private static final int PICK_PUBLICATION=18, EXPORT_ARTICLE_REVISION=19;
+    private final java.util.concurrent.atomic.AtomicBoolean articleRevisionExportBusy=new java.util.concurrent.atomic.AtomicBoolean(false);
     private TrackStore tracks;
     private boolean pendingTrackStart;
     private String exportLabel="备份已保存（不包含 API Key；轨迹需单独导出）";
@@ -68,13 +72,17 @@ public class MainActivity extends Activity {
     // Slow tiles must never occupy workers used by mode switching or life records.
     private final ExecutorService mapTasks = Executors.newFixedThreadPool(2);
     private final ExecutorService roadTasks = Executors.newSingleThreadExecutor();
+    private final ExecutorService photoTasks = Executors.newSingleThreadExecutor();
+    private final ExecutorService timerTasks = Executors.newSingleThreadExecutor();
+    private android.database.ContentObserver photoObserver;
+    private final Runnable photoChanged=()->{try{if(MainActivity.this.loaded&&TrackPhotos.enabled(this))event("trackPhotos",new JSONObject());}catch(Exception ignored){}};
     private byte[] exportBytes;
     private String pickKind = "attachment", pickRecordId="";
     private volatile String imageExportId="";
     private final java.util.concurrent.atomic.AtomicBoolean imageExportBusy=new java.util.concurrent.atomic.AtomicBoolean();
     private boolean loaded;
     private Intent pendingShare;
-    private static final int PICK = 10, EXPORT = 11, PICK_MAP=12, EXPORT_TRACK_FEEDBACK=13, PICK_ROADS=14, EXPORT_IMAGE=15;
+    private static final int PICK = 10, EXPORT = 11, PICK_MAP=12, EXPORT_TRACK_FEEDBACK=13, PICK_ROADS=14, EXPORT_IMAGE=15, EXPORT_ANALYSIS=17;
     private final java.util.concurrent.atomic.AtomicBoolean feedbackBusy=new java.util.concurrent.atomic.AtomicBoolean();
     private final java.util.concurrent.atomic.AtomicBoolean feedbackRunning=new java.util.concurrent.atomic.AtomicBoolean();
     private volatile JSONObject feedbackStatus=new JSONObject();
@@ -86,10 +94,12 @@ public class MainActivity extends Activity {
         // Allow user-initiated system screenshots; never capture or upload the screen ourselves.
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         store = new Store();
+        publications = new PublicationLibrary(this);
         tracks = new TrackStore(this);
-        getWindow().setStatusBarColor(0xfff6f5f0);
-        getWindow().setNavigationBarColor(0xfff6f5f0);
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        getWindow().setStatusBarColor(0xffededed);
+        getWindow().setNavigationBarColor(0xffededed);
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         FrameLayout frame = new FrameLayout(this);
         web = new WebView(this);
         frame.addView(web, new FrameLayout.LayoutParams(-1,-1));
@@ -100,6 +110,7 @@ public class MainActivity extends Activity {
         setContentView(frame);
         WebSettings ws = web.getSettings();
         ws.setJavaScriptEnabled(true); ws.setDomStorageEnabled(true); ws.setAllowFileAccess(false);
+        ws.setSupportZoom(false); ws.setBuiltInZoomControls(false); ws.setDisplayZoomControls(false);
         ws.setAllowContentAccess(false); ws.setAllowFileAccessFromFileURLs(false); ws.setAllowUniversalAccessFromFileURLs(false);
         ws.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         web.addJavascriptInterface(new Bridge(), "LifeNative");
@@ -109,19 +120,28 @@ public class MainActivity extends Activity {
             @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest req) {
                 Uri uri=req.getUrl();
                 if(!"appassets.androidplatform.net".equals(uri.getHost()))return new WebResourceResponse("text/plain","UTF-8",403,"Blocked",null,new java.io.ByteArrayInputStream(new byte[0]));
+                if(uri.getPath()!=null&&uri.getPath().matches("/track-photos/[0-9]{1,19}/(thumb|full)\\.jpg")){
+                    try{String[] pieces=uri.getPath().split("/");byte[] image=TrackPhotos.image(MainActivity.this,pieces[2],pieces[3].equals("full.jpg"));return new WebResourceResponse("image/jpeg",null,200,"OK",java.util.Collections.singletonMap("Cache-Control","no-store"),new java.io.ByteArrayInputStream(image));}
+                    catch(Exception error){return new WebResourceResponse("text/plain","UTF-8",404,"Unavailable",null,new java.io.ByteArrayInputStream(new byte[0]));}
+                }
                 if(uri.getPath()!=null&&uri.getPath().matches("/record-media/[a-f0-9]{64}\\.jpg")){try{return new WebResourceResponse("image/jpeg",null,new java.io.FileInputStream(RecordMedia.file(MainActivity.this,uri.getLastPathSegment().substring(0,64))));}catch(Exception e){return new WebResourceResponse("text/plain","UTF-8",404,"Not found",null,new java.io.ByteArrayInputStream(new byte[0]));}}
+                if(uri.getPath()!=null&&uri.getPath().startsWith("/publication-media/")){try{java.util.List<String> parts=uri.getPathSegments();if(parts.size()!=3)throw new Exception();JSONObject asset=publications.asset(parts.get(1),parts.get(2));return new WebResourceResponse(asset.getString("mime"),null,new java.io.FileInputStream(publications.assetFile(parts.get(1),parts.get(2))));}catch(Exception error){return new WebResourceResponse("text/plain","UTF-8",404,"Not found",null,new java.io.ByteArrayInputStream(new byte[0]));}}
                 String path=uri.getPath();if(path==null||!path.startsWith("/assets/")||path.contains(".."))return new WebResourceResponse("text/plain","UTF-8",404,"Not found",null,new java.io.ByteArrayInputStream(new byte[0]));
                 path=path.substring(8);String mime=path.endsWith(".js")?"application/javascript":path.endsWith(".css")?"text/css":path.endsWith(".html")?"text/html":"text/plain";
                 try{return new WebResourceResponse(mime,"UTF-8",getAssets().open(path));}catch(Exception e){return new WebResourceResponse("text/plain","UTF-8",404,"Not found",null,new java.io.ByteArrayInputStream(new byte[0]));}
             }
             @Override public void onPageFinished(WebView v, String url) { loaded=true; if(pendingShare!=null){handleShare(pendingShare);pendingShare=null;} }
         });
-        if(Intent.ACTION_SEND.equals(getIntent().getAction())) pendingShare=getIntent();
+        if(Intent.ACTION_SEND.equals(getIntent().getAction())||Intent.ACTION_VIEW.equals(getIntent().getAction())) pendingShare=getIntent();
+        photoObserver=new android.database.ContentObserver(main){@Override public void onChange(boolean self){main.removeCallbacks(photoChanged);main.postDelayed(photoChanged,1500);}};
+        observePhotos();
         web.loadUrl("https://appassets.androidplatform.net/assets/index.html");
     }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); if(loaded)handleShare(intent);else pendingShare=intent; }
     @Override public void onBackPressed() { web.evaluateJavascript("window.appBack && window.appBack()",value->{if(!"true".equals(value))super.onBackPressed();}); }
-    @Override protected void onDestroy() { MapTiles.cancelRequests(); mapTasks.shutdownNow(); roadTasks.shutdownNow(); tasks.shutdownNow(); if(tracks!=null)tracks.close(); if(web!=null){web.removeJavascriptInterface("LifeNative");web.destroy();} super.onDestroy(); }
+    private void observePhotos(){if(photoObserver==null)return;try{getContentResolver().unregisterContentObserver(photoObserver);getContentResolver().registerContentObserver(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,true,photoObserver);}catch(SecurityException ignored){}}
+    @Override protected void onResume(){super.onResume();if(loaded){observePhotos();main.removeCallbacks(photoChanged);main.post(photoChanged);}}
+    @Override protected void onDestroy() { main.removeCallbacks(photoChanged);if(photoObserver!=null)getContentResolver().unregisterContentObserver(photoObserver);photoTasks.shutdownNow();timerTasks.shutdownNow();MapTiles.cancelRequests(); mapTasks.shutdownNow(); roadTasks.shutdownNow(); tasks.shutdownNow(); if(tracks!=null)tracks.close();if(publications!=null)publications.close(); if(web!=null){web.removeJavascriptInterface("LifeNative");web.destroy();} super.onDestroy(); }
 
     private JSONObject trackingStatus()throws Exception{
         SharedPreferences p=TrackingService.prefs(this);JSONObject s=new JSONObject();
@@ -144,6 +164,7 @@ public class MainActivity extends Activity {
     }
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] grants){
         super.onRequestPermissionsResult(request,permissions,grants);
+        if(request==243){observePhotos();try{event("trackPhotos",TrackPhotos.status(this));}catch(Exception ignored){}return;}
         if(request==240&&pendingTrackStart){if(TrackingService.precise(this))startTrackingUI();else {pendingTrackStart=false;TrackingService.prefs(this).edit().putString("message","未获得精确定位权限，未开始记录").apply();}}
         if(request==241&&pendingTrackStart){pendingTrackStart=false;try{startForegroundService(new Intent(this,TrackingService.class));}catch(Exception e){TrackingService.prefs(this).edit().putString("message","无法启动，请检查权限").apply();}}
         if(request==242){try{JSONObject notice=new JSONObject();notice.put("message",TrackingService.background(this)?"始终允许定位已开启；重启恢复仍受系统后台限制":"未授予始终允许定位，重启不能自动恢复；仍可在App前台开启记录");event("notice",notice);}catch(Exception ignored){}}
@@ -156,7 +177,7 @@ public class MainActivity extends Activity {
     private void feedbackEvent(String state,long done,long total,String message){try{feedbackStatus=new JSONObject().put("state",state).put("done",done).put("total",total).put("message",message);event("trackFeedback",feedbackStatus);}catch(Exception ignored){}}
     private class Bridge {
         @JavascriptInterface public void call(String action,String input,String id) {
-            (action.equals("trackRoadMatch")?roadTasks:action.equals("trackTile")?mapTasks:tasks).execute(()->{try{deliver(id,execute(action,new JSONObject(input)),null);}catch(Exception e){deliver(id,null,cleanError(e));}});
+            ((action.equals("meditation")||action.equals("studyTimer"))?timerTasks:action.equals("trackPhotos")?photoTasks:action.equals("trackRoadMatch")?roadTasks:action.equals("trackTile")?mapTasks:tasks).execute(()->{try{deliver(id,execute(action,new JSONObject(input)),null);}catch(Exception e){deliver(id,null,cleanError(e));}});
         }
     }
     private String cleanError(Exception e) {
@@ -167,6 +188,21 @@ public class MainActivity extends Activity {
     }
     private Object execute(String action,JSONObject p) throws Exception {
         switch(action) {
+            case "publicationList": return publications.list();
+            case "publicationGet": return publications.get(p.getString("id"));
+            case "exportArticleRevision": {
+                if(!articleRevisionExportBusy.compareAndSet(false,true))throw new Exception("请先完成当前改稿导出");
+                JSONObject record=p.getJSONObject("record");try{ArticleRevisionExport.prepare(this,publications,record);}catch(Exception error){articleRevisionExportBusy.set(false);throw error;}
+                main.post(()->{Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");intent.putExtra(Intent.EXTRA_TITLE,"知流改稿_"+record.optString("title","文章").replaceAll("[\\/:*?\"<>|]","_")+".json");startActivityForResult(intent,EXPORT_ARTICLE_REVISION);});return true;
+            }
+            case "publicationPick": main.post(()->{Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT);pick.addCategory(Intent.CATEGORY_OPENABLE);pick.setType("*/*");pick.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/zip","application/x-zip-compressed","application/octet-stream"});startActivityForResult(pick,PICK_PUBLICATION);});return true;
+            case "copyText": {String text=p.getString("text");main.post(()->((android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(android.content.ClipData.newPlainText("知时消息",text)));return true;}
+            case "studyTimer": return store.studyTimer(p);
+            case "goalTasks": return GoalTaskStore.execute(store.getWritableDatabase(),p,MeditationStore.clock(this));
+            case "meditation": return MeditationStore.execute(store.getWritableDatabase(),p,MeditationStore.clock(this));
+            case "trackPhotos": return TrackPhotos.day(this,p.getString("date"));
+            case "trackPhotoStatus": return TrackPhotos.status(this);
+            case "trackPhotoConfig": {boolean enabled=p.getBoolean("enabled");main.post(()->{TrackPhotos.configure(this,enabled);try{event("trackPhotos",TrackPhotos.status(this));}catch(Exception ignored){}});return true;}
             case "dismissEditorSelection": {runOnUiThread(()->{if(editorActionMode!=null)editorActionMode.finish();if(web!=null){web.clearFocus();InputMethodManager input=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);if(input!=null)input.hideSoftInputFromWindow(web.getWindowToken(),0);}});return true;}
             case "saveImageSettings": {synchronized(this){JSONObject settings=privateSettings();settings.put("imageGeneration",ImageGeneration.configure(settings.optJSONObject("imageGeneration"),p.getJSONObject("settings")));encryptSettings(settings);return publicSettings();}}
             case "createIllustration": return ImageGeneration.create(this,privateSettings().optJSONObject("imageGeneration"),p);
@@ -176,12 +212,16 @@ public class MainActivity extends Activity {
             case "pendingRecordImage": {String value=getSharedPreferences("record-image-delivery",MODE_PRIVATE).getString("pending","");return value.isEmpty()?JSONObject.NULL:new JSONObject(value);}
             case "ackRecordImage": {SharedPreferences prefs=getSharedPreferences("record-image-delivery",MODE_PRIVATE);String value=prefs.getString("pending","");if(!value.isEmpty()&&new JSONObject(value).optString("deliveryId").equals(p.optString("deliveryId")))prefs.edit().remove("pending").commit();return true;}
             case "init": {
-                JSONObject o=new JSONObject();o.put("records",store.records());JSONObject chat=ChatStore.get(store.getWritableDatabase(),this,null);o.put("messages",chat.getJSONArray("messages"));o.put("chatSession",chat.getJSONObject("session"));o.put("chatSessions",chat.getJSONArray("sessions"));o.put("wikiPages",store.wikiPages());o.put("wikiInsights",WikiInsightStore.get(store.getWritableDatabase()));o.put("settings",publicSettings());return o;
+                migratePublicationRecords();
+                QwenLabelingService.schedule(this);
+                JSONObject o=new JSONObject();o.put("records",store.records());JSONObject chat=ChatStore.get(store.getWritableDatabase(),this,null);o.put("messages",chat.getJSONArray("messages"));o.put("chatSession",chat.getJSONObject("session"));o.put("chatSessions",chat.getJSONArray("sessions"));o.put("wikiPages",store.wikiPages());o.put("wikiInsights",WikiInsightStore.get(store.getWritableDatabase()));o.put("settings",publicSettings());o.put("goalTasks",GoalTaskStore.execute(store.getWritableDatabase(),new JSONObject(),MeditationStore.clock(this)).getJSONArray("items"));o.put("meditation",MeditationStore.execute(store.getWritableDatabase(),new JSONObject(),MeditationStore.clock(this)));return o;
             }
             case "getWikiInsights": return WikiInsightStore.get(store.getWritableDatabase());
             case "saveWikiInsight": return WikiInsightStore.save(store.getWritableDatabase(),p.getJSONObject("report"));
             case "reviewWikiInsight": return WikiInsightStore.review(store.getWritableDatabase(),p);
             case "getRecords": return store.records();
+            case "quantLabelStatus": return QwenLabelingService.status(this,store.getWritableDatabase());
+            case "quantLabelRetry": return QwenLabelingService.retry(this,store.getWritableDatabase());
             case "getDocumentDraft": return DocumentDrafts.get(this);
             case "saveDocumentDraft": return DocumentDrafts.save(this,p.getJSONObject("draft"));
             case "clearDocumentDraft": return DocumentDrafts.clear(this,p.getString("id"));
@@ -198,11 +238,16 @@ public class MainActivity extends Activity {
                 }finally{imageExportBusy.set(false);}
             }
             case "saveDocument": return store.saveDocument(p.getJSONObject("record"),p.optBoolean("allowDuplicate"),p.isNull("expectedVersion")?null:p.getLong("expectedVersion"));
+            case "feishuRead": return store.feishuPreview(FeishuImport.read(this,p.getString("url")));
+            case "feishuPending": {JSONObject s=FeishuImport.pending(this);return s==null?JSONObject.NULL:store.feishuPreview(s);}
+            case "feishuDiscard": FeishuImport.clear(this,p.getString("ticket"));return true;
+            case "feishuCommit": return store.feishuCommit(p);
+            case "feishuOpen": {String url=FeishuImport.canonical(p.getString("url"));main.post(()->startActivityForResult(new Intent(this,FeishuReaderActivity.class).putExtra("url",url),16));return true;}
             case "saveWiki": return store.saveWiki(p.getJSONObject("page"));
             case "getWikiJob": return store.wikiJob(p.getString("id"));
             case "saveWikiJob": return store.saveWikiJob(p.getJSONObject("job"));
             case "deleteWikiJob": return store.deleteWikiJob(p.getString("id"));
-            case "getWikiQueue": WikiAutomation.ensureBackfill(store.getWritableDatabase(),this);return store.wikiQueue();
+            case "getWikiQueue": WikiAutomation.ensureBackfill(store.getWritableDatabase(),this);if(WikiClassificationService.pending(store.getReadableDatabase())>0)WikiClassificationService.schedule(this);return store.wikiQueue().put("nativeClassification",true).put("classificationPending",WikiClassificationService.pending(store.getReadableDatabase())).put("classification",WikiClassificationService.status(this));
             case "ackWikiQueue": return store.ackWikiQueue(p.getJSONArray("jobs"));
             case "saveWikiTopics": return store.assignTopics(p.getJSONArray("items"));
             case "queueAllWiki": return store.backfillWiki();
@@ -217,7 +262,7 @@ public class MainActivity extends Activity {
             case "trackImportRoads": main.post(()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("*/*");i.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i,PICK_ROADS);});return true;
             case "trackStart": main.post(this::startTrackingUI);return true;
             case "trackStop": TrackingService.prefs(this).edit().putBoolean("enabled",false).putString("message","已暂停记录").apply();main.post(()->stopService(new Intent(this,TrackingService.class)));return true;
-            case "trackConfig": {SharedPreferences.Editor edit=TrackingService.prefs(this).edit();if(p.has("filterMode")){String filter=p.getString("filterMode");if(!filter.equals(TrackVariants.ID)&&!filter.equals(TrackFusion.ID))throw new Exception("轨迹方案无效");edit.putString("filterMode",filter);}if(p.has("resumeAfterReboot"))edit.putBoolean("resumeAfterReboot",p.getBoolean("resumeAfterReboot"));if(p.has("mapConsent"))edit.putBoolean("mapConsent",p.getBoolean("mapConsent"));if(p.has("mapMode")){String mode=p.getString("mapMode");if(!mode.matches("online|offline"))throw new Exception("地图模式无效");if(mode.equals("online")&&!p.optBoolean("mapConsent"))throw new Exception("在线地图需先取得同意");edit.putString("mapMode",mode).putString("mapProvider","osm");}edit.apply();if(p.has("mapMode")||p.has("mapConsent"))MapTiles.cancelRequests();return trackingStatus();}
+            case "trackConfig": {SharedPreferences.Editor edit=TrackingService.prefs(this).edit();if(p.has("filterMode")){String filter=p.getString("filterMode");if(!filter.equals(TrackRaw.ID)&&!filter.equals(TrackVariants.ID)&&!filter.equals(TrackFusion.ID))throw new Exception("轨迹方案无效");edit.putString("filterMode",filter);}if(p.has("resumeAfterReboot"))edit.putBoolean("resumeAfterReboot",p.getBoolean("resumeAfterReboot"));if(p.has("mapConsent"))edit.putBoolean("mapConsent",p.getBoolean("mapConsent"));if(p.has("mapMode")){String mode=p.getString("mapMode");if(!mode.matches("online|offline"))throw new Exception("地图模式无效");if(mode.equals("online")&&!p.optBoolean("mapConsent"))throw new Exception("在线地图需先取得同意");edit.putString("mapMode",mode).putString("mapProvider","osm");}edit.apply();if(p.has("mapMode")||p.has("mapConsent"))MapTiles.cancelRequests();return trackingStatus();}
             case "trackDeleteDay": return tracks.deleteDay(p.getString("date"));
             case "trackMapView": return MapTiles.begin(this,p.getLong("view"),p.getString("mode"));
             case "trackTile": {String mode=p.optString("mode",TrackingService.prefs(this).getString("mapMode","offline"));if(!mode.matches("online|offline"))throw new Exception("地图模式无效");return MapTiles.get(this,p.getInt("z"),p.getInt("x"),p.getInt("y"),privateSettings().optString("mapTileKey"),mode.equals("offline"),p.optLong("view",0));}
@@ -295,19 +340,27 @@ public class MainActivity extends Activity {
             case "pick": {
                 pickKind=p.optString("kind","attachment");pickRecordId=p.optString("recordId","");String kind=pickKind;main.post(()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType(kind.equals("record-image")?"image/*":"*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(intent,PICK);});return true;
             }
+            case "analysisExportStatus": return AnalysisExportManager.status(this);
+            case "analysisExportStart": {
+                JSONObject prepared=store.prepareAnalysisExport();
+                main.post(()->{try{if(isDestroyed())throw new IllegalStateException();Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");intent.putExtra(Intent.EXTRA_TITLE,prepared.getString("fileName"));startActivityForResult(intent,EXPORT_ANALYSIS);}catch(Exception error){try{event("analysisExport",AnalysisExportManager.failPicker(this));}catch(Exception ignored){}}});
+                return prepared;
+            }
             case "export": {
                 exportLabel="备份已保存（不包含 API Key；轨迹需在轨迹页单独导出）";
                 JSONObject backup=new JSONObject();backup.put("format","quantlife");backup.put("version",1);backup.put("exportedAt",System.currentTimeMillis());backup.put("records",store.records());backup.put("messages",store.messages());backup.put("wikiPages",store.wikiPages());backup.put("wikiInsights",WikiInsightStore.get(store.getWritableDatabase()));
                 backup.put("recordMedia",RecordMedia.exportImages(this,backup.getJSONArray("records")));
+                backup.put("meditationSessions",MeditationStore.export(store.getWritableDatabase()));
+                backup.put("goalTasks",GoalTaskStore.export(store.getWritableDatabase(),MeditationStore.clock(this)));
                 exportBytes=backup.toString(2).getBytes(StandardCharsets.UTF_8);
                 main.post(()->{Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");intent.putExtra(Intent.EXTRA_TITLE,"知时备份-"+new SimpleDateFormat("yyyyMMdd-HHmm",Locale.US).format(new Date())+".json");startActivityForResult(intent,EXPORT);});return true;
             }
             case "import": {
                 JSONArray list=p.getJSONArray("records");if(list.length()>50000)throw new Exception("一次最多导入 50000 条记录");
                 RecordMedia.restoreImages(this,p.optJSONArray("recordMedia"));
-                SQLiteDatabase db=store.getWritableDatabase();db.beginTransaction();int inserted=0,skipped=0;
-                try{for(int i=0;i<list.length();i++){JSONObject r=list.getJSONObject(i);if(store.has(r.getString("id"))||store.duplicate(r)){skipped++;continue;}store.save(r,false);inserted++;}db.setTransactionSuccessful();}finally{db.endTransaction();}
-                JSONObject result=new JSONObject();result.put("inserted",inserted);result.put("skipped",skipped);result.put("records",store.records());return result;
+                SQLiteDatabase db=store.getWritableDatabase();int inserted=0,skipped=0,meditationInserted,goalTasksInserted;
+                synchronized(GoalTaskStore.class){synchronized(MeditationStore.class){db.beginTransaction();try{for(int i=0;i<list.length();i++){JSONObject r=list.getJSONObject(i);if(store.has(r.getString("id"))||store.duplicate(r)){skipped++;continue;}store.save(r,false);inserted++;}meditationInserted=MeditationStore.restore(db,p.optJSONArray("meditationSessions"));goalTasksInserted=GoalTaskStore.restore(db,p.optJSONArray("goalTasks"));db.setTransactionSuccessful();}finally{db.endTransaction();}}}
+                JSONObject result=new JSONObject();result.put("inserted",inserted);result.put("skipped",skipped);result.put("meditationInserted",meditationInserted);result.put("goalTasksInserted",goalTasksInserted);result.put("goalTasks",GoalTaskStore.execute(db,new JSONObject(),MeditationStore.clock(this)).getJSONArray("items"));result.put("records",store.records());return result;
             }
             case "openUrl": {
                 Uri uri=Uri.parse(p.getString("url"));if(!"https".equals(uri.getScheme())&&!"http".equals(uri.getScheme()))throw new Exception("链接格式不正确");
@@ -317,8 +370,8 @@ public class MainActivity extends Activity {
         }
     }
     private class Store extends SQLiteOpenHelper {
-        @Override public void onOpen(SQLiteDatabase db){super.onOpen(db);db.execSQL("CREATE TABLE IF NOT EXISTS wiki_jobs (id TEXT PRIMARY KEY,payload TEXT NOT NULL)");WikiInsightStore.create(db);try{WorkLogMigration.run(db);}catch(Exception e){throw new android.database.sqlite.SQLiteException("工作日志迁移失败，原始内容保留",e);}}
-        Store(){super(MainActivity.this,"quantlife.db",null,4);}
+        @Override public void onOpen(SQLiteDatabase db){super.onOpen(db);GoalTaskStore.create(db);db.execSQL("CREATE TABLE IF NOT EXISTS wiki_jobs (id TEXT PRIMARY KEY,payload TEXT NOT NULL)");WikiInsightStore.create(db);WikiClassificationService.create(db);QwenLabels.create(db);InformationUnits.create(db);try{WorkLogMigration.run(db);}catch(Exception e){throw new android.database.sqlite.SQLiteException("工作日志迁移失败，原始内容保留",e);}}
+        Store(){super(MainActivity.this,"quantlife.db",null,4);setWriteAheadLoggingEnabled(true);}
         @Override public void onCreate(SQLiteDatabase db) {
             db.execSQL("CREATE TABLE records (id TEXT PRIMARY KEY,type TEXT NOT NULL,date TEXT NOT NULL,title TEXT NOT NULL,platform TEXT NOT NULL,payload TEXT NOT NULL)");
             db.execSQL("CREATE INDEX record_date ON records(date)");
@@ -326,6 +379,7 @@ public class MainActivity extends Activity {
             db.execSQL("CREATE TABLE wiki_pages (id TEXT PRIMARY KEY,payload TEXT NOT NULL)");WikiAutomation.create(db);ChatStore.create(db);
         }
         @Override public void onUpgrade(SQLiteDatabase db,int old,int next) {if(next!=4)throw new IllegalStateException("Unsupported schema migration");if(old<2)db.execSQL("CREATE TABLE IF NOT EXISTS wiki_pages (id TEXT PRIMARY KEY,payload TEXT NOT NULL)");if(old<3)WikiAutomation.create(db);if(old<4)ChatStore.create(db);}
+        synchronized JSONObject prepareAnalysisExport()throws Exception{return AnalysisExportManager.prepare(MainActivity.this,getWritableDatabase());}
         synchronized JSONArray wikiPages()throws Exception{JSONArray a=new JSONArray();try(Cursor c=getReadableDatabase().rawQuery("SELECT payload FROM wiki_pages ORDER BY rowid DESC",null)){while(c.moveToNext())a.put(new JSONObject(c.getString(0)));}return a;}
         synchronized JSONObject saveWiki(JSONObject page)throws Exception{
             String id=page.getString("id"),topic=page.getString("topic");if(id.isEmpty()||id.length()>160||topic.trim().isEmpty()||topic.length()>100||page.getString("summary").length()>12000||page.toString().length()>500000)throw new Exception("Wiki 知识页格式无效");
@@ -343,12 +397,53 @@ public class MainActivity extends Activity {
             }return false;
         }
         synchronized JSONObject save(JSONObject r,boolean allow) throws Exception {SQLiteDatabase db=getWritableDatabase();boolean own=!db.inTransaction();if(own)db.beginTransaction();try{JSONObject saved=saveImpl(r,allow);if(own)db.setTransactionSuccessful();return saved;}finally{if(own)db.endTransaction();}}
-        synchronized JSONObject saveDocument(JSONObject r,boolean allow,Long expected)throws Exception{SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{JSONObject current=record(r.getString("id"));if(expected==null?current!=null:current==null||current.optLong("updatedAt")!=expected)throw new Exception("记录已变化，草稿已保留；请重新打开最新记录后合并，未覆盖原文");if(!r.optString("type").matches("learning|work_note|idea|experience")||!RecordMedia.hasBody(r.optString("note")))throw new Exception("请填写文字正文，图片不能代替正文");if(current!=null&&!current.getString("type").equals(r.getString("type")))throw new Exception("不能更换记录类型");JSONObject saved=saveImpl(r,allow);db.setTransactionSuccessful();return saved;}finally{db.endTransaction();}}
+        synchronized JSONObject studyTimer(JSONObject p)throws Exception{JSONObject result=StudyTimerStore.execute(getWritableDatabase(),p,MeditationStore.clock(MainActivity.this));if(result.has("draft")){JSONObject draft=result.getJSONObject("draft"),existing=record(draft.getString("id"));result.put("draft",existing!=null?existing:DocumentDrafts.seed(MainActivity.this,draft).getJSONObject("record"));result.put("committed",existing!=null);}return result;}
+        synchronized JSONObject saveDocument(JSONObject r,boolean allow,Long expected)throws Exception{SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{JSONObject current=record(r.getString("id"));if(expected==null?current!=null:current==null||current.optLong("updatedAt")!=expected)throw new Exception("记录已变化，草稿已保留；请重新打开最新记录后合并，未覆盖原文");if(!r.optString("type").matches("learning|work_note|idea|experience|creation")||!RecordMedia.hasBody(r.optString("note")))throw new Exception("请填写文字正文，图片不能代替正文");if(current!=null&&!current.getString("type").equals(r.getString("type")))throw new Exception("不能更换记录类型");JSONObject saved=saveImpl(r,allow);db.setTransactionSuccessful();return saved;}finally{db.endTransaction();}}
+        private JSONObject feishuExisting(JSONObject s)throws Exception {
+            JSONObject found=null;JSONArray all=records();for(int i=0;i<all.length();i++){JSONObject r=all.getJSONObject(i);if(!r.optString("type").equals("learning")||r.has("feishuCopy"))continue;JSONObject meta=r.optJSONObject("feishuSource");boolean match=meta!=null&&meta.optString("documentId").equals(s.getString("documentId"));
+                if(!match&&!r.optString("url").isEmpty())try{String u=FeishuImport.canonical(r.getString("url"));match=u.equals(s.getString("url"))||u.equals(s.getString("requestedUrl"))||u.endsWith("/docx/"+s.getString("documentId"));}catch(Exception ignored){}
+                if(match){if(found!=null)throw new Exception("已有多条记录引用这篇飞书文档，请先在学习记录中合并，未自动覆盖");found=r;}}
+            return found;
+        }
+        synchronized JSONObject feishuPreview(JSONObject snapshot)throws Exception {
+            JSONObject out=new JSONObject(snapshot.toString()),existing=feishuExisting(snapshot);out.put("existing",existing==null?JSONObject.NULL:existing);
+            if(existing!=null){JSONObject meta=existing.optJSONObject("feishuSource");out.put("localChanged",meta==null||!FeishuImport.contentHash(existing).equals(meta.optString("baseline")));out.put("unchanged",FeishuImport.contentHash(existing).equals(FeishuImport.contentHash(snapshot)));}return out;
+        }
+        synchronized JSONObject feishuCommit(JSONObject p)throws Exception {
+            synchronized(FeishuImport.class){JSONObject snapshot=FeishuImport.pending(MainActivity.this);if(snapshot==null||!snapshot.getString("ticket").equals(p.getString("ticket")))throw new Exception("预览已过期，请重新读取飞书文档");
+                if(snapshot.getJSONArray("warnings").length()>0&&!p.optBoolean("acknowledge"))throw new Exception("请核对并确认导入限制");
+                SQLiteDatabase db=getWritableDatabase();db.beginTransaction();JSONObject saved;boolean unchanged=false;try{
+                    JSONObject existing=feishuExisting(snapshot);boolean copy=p.optBoolean("copy");String expected=p.optString("expectedId");
+                    String targetId=(copy?"feishu-copy-":"feishu-")+FeishuImport.hash(copy?snapshot.getString("ticket"):snapshot.getString("documentId"));JSONObject prior=record(targetId);
+                    if(copy&&prior!=null){saved=prior;unchanged=true;}
+                    else if(existing!=null&&!copy&&FeishuImport.contentHash(existing).equals(FeishuImport.contentHash(snapshot))){
+                        if(p.optBoolean("updateDate")&&!existing.getString("date").equals(p.getString("date"))){
+                            if(!expected.equals(existing.getString("id"))||p.optLong("expectedVersion",-1)!=existing.optLong("updatedAt"))throw new Exception("本地记录已变化，请重新读取后核对日期");
+                            JSONObject r=new JSONObject(existing.toString());r.put("date",p.getString("date"));saved=saveImpl(r,true);
+                        }else {saved=existing;unchanged=true;}
+                    }
+                    else {
+                        if(existing!=null&&!copy){JSONObject meta=existing.optJSONObject("feishuSource");if(!expected.equals(existing.getString("id"))||p.optLong("expectedVersion",-1)!=existing.optLong("updatedAt"))throw new Exception("本地记录已变化，请重新读取预览后核对，未覆盖原文");if(meta==null||!FeishuImport.contentHash(existing).equals(meta.optString("baseline")))throw new Exception("本地笔记已修改，不能自动覆盖；可以保留本地或另存副本");}
+                        if(existing==null&&!expected.isEmpty()&&!copy)throw new Exception("原记录已删除，请重新读取后导入");
+                        if(existing==null&&prior!=null)throw new Exception("导入编号与现有记录冲突，请保留本地并另存副本");
+                        JSONObject r=existing==null||copy?new JSONObject().put("id",targetId).put("type","learning").put("date",p.getString("date")).put("durationMinutes",p.optDouble("durationMinutes",0)).put("platform","飞书").put("contentType","article").put("tags",new JSONArray()).put("source","feishu"):new JSONObject(existing.toString());
+                        r.put("title",snapshot.getString("title")).put("note",snapshot.getString("note")).put("images",snapshot.getJSONArray("images")).put("url",snapshot.getString("url"));
+                        if(existing!=null&&!copy&&p.optBoolean("updateDate"))r.put("date",p.getString("date"));
+                        JSONObject meta=new JSONObject().put("documentId",snapshot.getString("documentId")).put("url",snapshot.getString("requestedUrl")).put("importedAt",System.currentTimeMillis()).put("baseline",FeishuImport.contentHash(r));
+                        if(snapshot.has("documentCreatedDate"))meta.put("documentCreatedDate",snapshot.getString("documentCreatedDate")).put("documentCreatedAt",snapshot.getLong("documentCreatedAt"));
+                        if(copy){r.remove("feishuSource");r.put("feishuCopy",meta);}else r.put("feishuSource",meta);
+                        saved=saveImpl(r,true);
+                    }db.setTransactionSuccessful();
+                }finally{db.endTransaction();}
+                // Keeping the staged ticket makes a lost bridge reply safely retryable.
+                return new JSONObject().put("record",saved).put("unchanged",unchanged);
+            }
+        }
         private JSONObject saveImpl(JSONObject r,boolean allow) throws Exception {
             SQLiteDatabase db=getWritableDatabase();
             String id=r.getString("id"),type=r.getString("type"),date=r.getString("date"),title=r.getString("title").trim();
             RecordMedia.validate(MainActivity.this,r);
-            if(id.isEmpty()||id.length()>100||!type.matches("learning|work|work_note|idea|experience")||!date.matches("\\d{4}-\\d{2}-\\d{2}")||title.isEmpty()||title.length()>300)throw new Exception("记录格式无效");
+            if(id.isEmpty()||id.length()>100||!type.matches("learning|work|work_note|idea|experience|creation")||!date.matches("\\d{4}-\\d{2}-\\d{2}")||title.isEmpty()||title.length()>300)throw new Exception("记录格式无效");
             parseLocal(date+"T00:00:00");
             for(String field:new String[]{"note","platform","url"}){if(r.has(field)&&!(r.get(field) instanceof String))throw new Exception("笔记、平台和链接必须是文本");if(!r.has(field))r.put(field,"");}
             if(!r.has("tags"))r.put("tags",new JSONArray());JSONArray tags=r.getJSONArray("tags");if(tags.length()>100)throw new Exception("标签过多");for(int i=0;i<tags.length();i++)if(!(tags.get(i) instanceof String))throw new Exception("标签格式无效");
@@ -361,6 +456,15 @@ public class MainActivity extends Activity {
                 r.put("durationMinutes",0);
             }
             if(type.equals("work_note")){if(r.getString("note").trim().isEmpty()||duration!=0||!r.optString("workStart").isEmpty()||!r.optString("workEnd").isEmpty())throw new Exception("工作日志须有内容，不能夹带工时或班次");if(!r.optString("occurredAt").isEmpty()){parseLocal(r.getString("occurredAt"));if(!r.getString("occurredAt").startsWith(date+"T"))throw new Exception("日志日期与发生时间不一致");}r.put("durationMinutes",0);}
+            if(type.equals("creation")){
+                if(!RecordMedia.hasBody(r.optString("note"))||duration!=0||!r.optString("workStart").isEmpty()||!r.optString("workEnd").isEmpty()||r.has("studyTiming"))throw new Exception("创作须有文字内容，不包含学习时长或工作班次");
+                if(!r.optString("occurredAt").isEmpty()){parseLocal(r.getString("occurredAt"));if(!r.getString("occurredAt").startsWith(date+"T"))throw new Exception("创作日期与发生时间不一致");}
+                String platform=r.optString("creatorPlatform"),status=r.optString("creationStatus","draft"),published=r.optString("publishedUrl");
+                for(String field:new String[]{"creatorPlatform","creationStatus","publishedUrl"})if(r.has(field)&&!(r.get(field) instanceof String))throw new Exception("创作平台、状态和发布链接必须为文本");
+                if(platform.length()>100||!status.matches("draft|ready|published")||published.length()>4000)throw new Exception("创作平台、状态或链接格式无效");
+                if(!published.isEmpty()){Uri uri=Uri.parse(published);if(!java.util.Arrays.asList("https","http").contains(uri.getScheme())||uri.getHost()==null||uri.getHost().isEmpty()||java.util.regex.Pattern.compile("[\\s\\x00-\\x1f]").matcher(published).find())throw new Exception("请填写有效的发布链接");}
+                r.put("durationMinutes",0).put("creatorPlatform",platform).put("creationStatus",status).put("publishedUrl",published);
+            }
             if(r.has("wikiTopics")){JSONArray topicList=r.getJSONArray("wikiTopics");if(topicList.length()>3)throw new Exception("Wiki主题过多");for(int i=0;i<topicList.length();i++)if(!(topicList.get(i) instanceof String)||topicList.getString(i).trim().length()<2||topicList.getString(i).length()>60)throw new Exception("Wiki主题元信息无效");}
 
             if(!allow&&duplicate(r))throw new Exception("检测到相同日期、标题、平台的重复记录");
@@ -373,7 +477,7 @@ public class MainActivity extends Activity {
             }
             JSONObject previous=record(id);if(!r.has("createdAt"))r.put("createdAt",System.currentTimeMillis());r.put("updatedAt",Math.max(System.currentTimeMillis(),previous==null?0:previous.optLong("updatedAt")+1));
             android.content.ContentValues values=new android.content.ContentValues();values.put("id",id);values.put("type",type);values.put("date",date);values.put("title",title);values.put("platform",r.optString("platform"));values.put("payload",r.toString());
-            if(getWritableDatabase().insertWithOnConflict("records",null,values,SQLiteDatabase.CONFLICT_REPLACE)==-1)throw new Exception("记录写入失败");invalidateWikiJobs(db,id);WikiAutomation.enqueue(getWritableDatabase(),id,r.getLong("updatedAt"),"upsert");WorkLogMigration.split(db,r);return r;
+            if(getWritableDatabase().insertWithOnConflict("records",null,values,SQLiteDatabase.CONFLICT_REPLACE)==-1)throw new Exception("记录写入失败");invalidateWikiJobs(db,id);db.delete("wiki_classification_jobs","id=?",new String[]{id});if(!type.equals("creation"))WikiAutomation.enqueue(getWritableDatabase(),id,r.getLong("updatedAt"),"upsert");else db.delete("wiki_queue","id=?",new String[]{id});WikiClassificationService.schedule(MainActivity.this);QwenLabelingService.schedule(MainActivity.this);WorkLogMigration.split(db,r);return r;
         }
         private JSONObject record(String id)throws Exception{try(Cursor c=getReadableDatabase().rawQuery("SELECT payload FROM records WHERE id=?",new String[]{id})){return c.moveToFirst()?new JSONObject(c.getString(0)):null;}}
         private void invalidateWikiJobs(SQLiteDatabase db,String source)throws Exception{java.util.ArrayList<String> ids=new java.util.ArrayList<>();try(Cursor c=db.rawQuery("SELECT id,payload FROM wiki_jobs",null)){while(c.moveToNext()){JSONObject versions=new JSONObject(c.getString(1)).optJSONObject("versions");if(versions!=null&&versions.has(source))ids.add(c.getString(0));}}for(String id:ids)db.delete("wiki_jobs","id=?",new String[]{id});}
@@ -384,7 +488,7 @@ public class MainActivity extends Activity {
         synchronized int ackWikiQueue(JSONArray jobs)throws Exception{return WikiAutomation.acknowledge(getWritableDatabase(),jobs);}
         synchronized JSONArray assignTopics(JSONArray items)throws Exception{return WikiAutomation.assign(getWritableDatabase(),items);}
         synchronized int backfillWiki()throws Exception{return WikiAutomation.backfill(getWritableDatabase());}
-        synchronized boolean deleteRecord(String id)throws Exception{SQLiteDatabase db=getWritableDatabase();boolean own=!db.inTransaction();if(own)db.beginTransaction();try{JSONObject before=record(id);if(before!=null){db.delete("records","id=?",new String[]{id});invalidateWikiJobs(db,id);WikiAutomation.enqueue(db,id,Math.max(System.currentTimeMillis(),before.optLong("updatedAt")+1),"delete");}if(own)db.setTransactionSuccessful();return true;}finally{if(own)db.endTransaction();}}
+        synchronized boolean deleteRecord(String id)throws Exception{SQLiteDatabase db=getWritableDatabase();boolean own=!db.inTransaction();if(own)db.beginTransaction();try{JSONObject before=record(id);if(before!=null){db.delete("records","id=?",new String[]{id});db.delete("quant_label_jobs","id=?",new String[]{id});InformationUnits.delete(db,id);invalidateWikiJobs(db,id);if(!before.optString("type").equals("creation"))WikiAutomation.enqueue(db,id,Math.max(System.currentTimeMillis(),before.optLong("updatedAt")+1),"delete");else db.delete("wiki_queue","id=?",new String[]{id});}if(own)db.setTransactionSuccessful();return true;}finally{if(own)db.endTransaction();}}
         synchronized Object applyAction(JSONObject action)throws Exception{SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{String id=action.getString("recordId"),kind=action.getString("kind");JSONObject current=record(id);if(current==null||current.optLong("updatedAt")!=action.getLong("expectedVersion"))throw new Exception("记录已被修改或删除，请重新检索并确认，未覆盖新数据");Object result;if(kind.equals("delete"))result=deleteRecord(id);else if(kind.equals("update")){JSONObject incoming=action.optJSONObject("patch");if(incoming==null){incoming=action.getJSONObject("record");if(!id.equals(incoming.getString("id"))||!current.getString("type").equals(incoming.getString("type")))throw new Exception("更新不能更换记录编号或类型");}JSONArray clear=action.optJSONArray("clearFields");for(String k:new String[]{"title","date","platform","contentType","tags","note","url","durationMinutes","occurredAt","workStart","workEnd","breaks"})if(incoming.has(k)){boolean explicit=false;if(clear!=null)for(int i=0;i<clear.length();i++)if(k.equals(clear.optString(i)))explicit=true;if(k.equals("note")&&!current.optString(k).isEmpty()&&(incoming.isNull(k)||incoming.optString(k).isEmpty())&&!explicit)continue;current.put(k,incoming.get(k));}result=save(current,false);}else throw new Exception("不允许的记录操作");db.setTransactionSuccessful();return result;}finally{db.endTransaction();}}
         synchronized JSONArray messages()throws Exception{return ChatStore.messages(getReadableDatabase(),null);}
         synchronized void saveMessage(JSONObject m)throws Exception{ChatStore.message(getWritableDatabase(),MainActivity.this,m);}
@@ -400,65 +504,42 @@ public class MainActivity extends Activity {
         SharedPreferences sp=getSharedPreferences("secure",MODE_PRIVATE);String encrypted=sp.getString("settings",null);if(encrypted==null)return new JSONObject();
         String[] parts=encrypted.split(":");Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Base64.decode(parts[0],Base64.NO_WRAP)));return new JSONObject(new String(c.doFinal(Base64.decode(parts[1],Base64.NO_WRAP)),StandardCharsets.UTF_8));
     }
-    private void encryptSettings(JSONObject s)throws Exception{Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,key());String encrypted=Base64.encodeToString(c.getIV(),Base64.NO_WRAP)+":"+Base64.encodeToString(c.doFinal(s.toString().getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP);if(!getSharedPreferences("secure",MODE_PRIVATE).edit().putString("settings",encrypted).commit())throw new Exception("设置保存失败");}
+    private void encryptSettings(JSONObject s)throws Exception{Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,key());String encrypted=Base64.encodeToString(c.getIV(),Base64.NO_WRAP)+":"+Base64.encodeToString(c.doFinal(s.toString().getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP);if(!getSharedPreferences("secure",MODE_PRIVATE).edit().putString("settings",encrypted).commit())throw new Exception("设置保存失败");WikiClassificationService.schedule(this);QwenLabelingService.schedule(this);}
     private JSONObject publicSettings()throws Exception{JSONObject s=privateSettings();s.put("imageGeneration",ImageGeneration.publicConfig(s.optJSONObject("imageGeneration")));s.put("wikiAutomation",WikiAutomation.settings(this));s.remove("mapTileKey");JSONObject search=DeepSeekTools.settings(s);search.put("keyConfigured",!search.optString("apiKey").isEmpty());search.remove("apiKey");s.put("linkSearch",search);JSONObject profiles=s.optJSONObject("profiles");if(profiles!=null){java.util.Iterator<String> it=profiles.keys();while(it.hasNext()){JSONObject p=profiles.getJSONObject(it.next());p.put("keyConfigured",!p.optString("apiKey").isEmpty());p.remove("apiKey");}}return s;}
 
-    private JSONObject ask(JSONObject p) throws Exception {
-        JSONObject settings=privateSettings(),profiles=settings.optJSONObject("profiles");String active=settings.optString("activeProfile");
-        JSONObject profile=profiles==null?null:profiles.optJSONObject(active);if(profile==null||profile.optString("apiKey").isEmpty())throw new Exception("请先在历史侧栏的「模型配置」中填写 API Key");
-        String endpoint=profile.getString("baseUrl"),protocol=profile.optString("protocol","chat");
-        URL url=new URL(endpoint+(protocol.equals("responses")?"/responses":"/chat/completions"));
-        ModelEndpoint.validate(url);
-        JSONArray chat=p.getJSONArray("messages");JSONObject body=new JSONObject();body.put("model",profile.getString("model"));body.put("stream",false);
-        JSONObject tool=p.optJSONObject("tool");boolean layout=tool!=null&&"plan_record_layout".equals(tool.optString("name"));
-        String reference=p.optString("illustrationReferenceId");
-        if(!reference.isEmpty()){
-            if(tool==null||!"prepare_record_illustration".equals(tool.optString("name")))throw new Exception("参考图片只用于笔记配图策划");
-            byte[] image=readBytes(new java.io.FileInputStream(RecordMedia.file(this,reference)),4*1024*1024);
-            JSONObject user=chat.getJSONObject(chat.length()-1);if(!"user".equals(user.optString("role")))throw new Exception("配图请求格式无效");
-            user.put("content",new JSONArray().put(new JSONObject().put("type","text").put("text",user.getString("content"))).put(new JSONObject().put("type","image_url").put("image_url",new JSONObject().put("url","data:image/jpeg;base64,"+Base64.encodeToString(image,Base64.NO_WRAP)))));
-        }
-        String effort=profile.optString("effort","off");
-        if(protocol.equals("responses")) {
-            JSONArray input=new JSONArray();String instruction="";
-            for(int i=0;i<chat.length();i++){JSONObject m=chat.getJSONObject(i);if(m.getString("role").equals("system")){instruction+=m.getString("content");continue;}
-                JSONObject out=new JSONObject();out.put("role",m.getString("role"));Object content=m.get("content");
-                if(content instanceof JSONArray){JSONArray items=new JSONArray();JSONArray parts=(JSONArray)content;for(int j=0;j<parts.length();j++){JSONObject part=parts.getJSONObject(j),item=new JSONObject();if(part.getString("type").equals("text")){item.put("type","input_text");item.put("text",part.getString("text"));}else{item.put("type","input_image");item.put("image_url",part.getJSONObject("image_url").getString("url"));}items.put(item);}out.put("content",items);}else out.put("content",content);input.put(out);
-            }body.put("instructions",instruction);body.put("input",input);body.put("store",false);body.put("max_output_tokens",layout?8192:4096);
-            if(!effort.equals("off")){JSONObject reasoning=new JSONObject();reasoning.put("effort",effort);body.put("reasoning",reasoning);}
-            if(tool!=null){JSONObject t=new JSONObject(tool.toString());t.put("type","function");body.put("tools",new JSONArray().put(t));body.put("tool_choice",(layout||profile.optString("id").equals("deepseek"))&&effort.equals("off")?new JSONObject().put("type","function").put("name",tool.getString("name")):"auto");}
-        } else {
-            body.put("messages",chat);body.put("max_tokens",layout?8192:4096);
-            if(tool!=null){JSONObject t=new JSONObject();t.put("type","function");t.put("function",tool);body.put("tools",new JSONArray().put(t));body.put("tool_choice",(layout||profile.optString("id").equals("deepseek"))&&effort.equals("off")?new JSONObject().put("type","function").put("function",new JSONObject().put("name",tool.getString("name"))):"auto");}
-            if(ModelEndpoint.bailian(url)){body.put("enable_thinking",!effort.equals("off"));}
-            else if(profile.optString("id").equals("glm")){JSONObject thinking=new JSONObject();thinking.put("type",effort.equals("off")?"disabled":"enabled");body.put("thinking",thinking);}
-            else if(profile.optString("id").equals("deepseek")){body.put("thinking",new JSONObject().put("type",effort.equals("off")?"disabled":"enabled"));if(!effort.equals("off"))body.put("reasoning_effort",effort);}
-            else if(!effort.equals("off"))body.put("reasoning_effort",effort);
-        }
-        HttpURLConnection conn=(HttpURLConnection)url.openConnection();conn.setConnectTimeout(20000);conn.setReadTimeout(120000);conn.setInstanceFollowRedirects(false);conn.setRequestMethod("POST");conn.setDoOutput(true);conn.setRequestProperty("Content-Type","application/json; charset=utf-8");conn.setRequestProperty("Authorization","Bearer "+profile.getString("apiKey"));
-        try {
-            try(OutputStream out=conn.getOutputStream()){out.write(body.toString().getBytes(StandardCharsets.UTF_8));}
-            int code=conn.getResponseCode();if(code<200||code>=300){
-                if(code==401||code==403)throw new Exception("模型服务拒绝认证（"+code+"），请检查 API Key 和模型权限");
-                if(code==429)throw new Exception("模型服务限流或额度不足，请稍后重试并检查余额");
-                if(code==404)throw new Exception("接口或模型不存在（404），请检查 API 地址、协议和模型名称");
-                throw new Exception("模型请求失败（HTTP "+code+"）；请检查模型是否支持图片、输入长度与服务状态");
-            }
-            JSONObject response=new JSONObject(new String(readBytes(conn.getInputStream(),8*1024*1024),StandardCharsets.UTF_8));StringBuilder answer=new StringBuilder();
-            JSONArray choicesForStatus=response.optJSONArray("choices");if("incomplete".equals(response.optString("status"))||choicesForStatus!=null&&choicesForStatus.length()>0&&"length".equals(choicesForStatus.getJSONObject(0).optString("finish_reason")))throw new Exception("模型输出达到上限，结果不完整，请重试");
-            if(protocol.equals("responses")){JSONArray outputs=response.optJSONArray("output");if(outputs!=null)for(int i=0;i<outputs.length();i++){JSONObject output=outputs.getJSONObject(i);if("function_call".equals(output.optString("type"))&&(tool==null?"prepare_life_records":tool.optString("name")).equals(output.optString("name"))){answer.setLength(0);answer.append(output.getString("arguments"));break;}JSONArray parts=output.optJSONArray("content");if(parts!=null)for(int j=0;j<parts.length();j++)if("output_text".equals(parts.getJSONObject(j).optString("type")))answer.append(parts.getJSONObject(j).optString("text"));}}
-            else{JSONArray choices=response.optJSONArray("choices");if(choices!=null&&choices.length()>0){JSONObject message=choices.getJSONObject(0).getJSONObject("message");JSONArray calls=message.optJSONArray("tool_calls");if(calls!=null){for(int i=0;i<calls.length();i++){JSONObject function=calls.getJSONObject(i).getJSONObject("function");if((tool==null?"prepare_life_records":tool.optString("name")).equals(function.optString("name"))){answer.append(function.getString("arguments"));break;}}}if(answer.length()==0)answer.append(message.optString("content", ""));}}
-            if(answer.toString().trim().isEmpty()||"null".equals(answer.toString().trim()))throw new Exception("模型未返回文本，请稍后重试或检查模型配置");
-            JSONObject result=new JSONObject();result.put("text",answer.toString());result.put("model",profile.getString("model"));if(response.has("usage"))result.put("usage",response.get("usage"));return result;
-        }finally{conn.disconnect();}
-    }
+    private JSONObject ask(JSONObject p)throws Exception{return ModelRequests.ask(this,p);}
     private static byte[] readBytes(InputStream input,int max)throws Exception{try(InputStream in=input;ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1){if(out.size()+n>max)throw new Exception("文件超过大小限制");out.write(buffer,0,n);}return out.toByteArray();}}
+    private JSONObject adoptPublication(JSONObject imported)throws Exception{
+        String id="knowflow-"+imported.getString("id");
+        JSONObject existing=store.record(id);if(existing!=null)return new JSONObject(existing.toString()).put("alreadyImported",true);
+        JSONObject record=PublicationArticle.record(this,publications,imported,id);
+        return store.saveDocument(record,true,null);
+    }
+    private void migratePublicationRecords()throws Exception{
+        android.content.SharedPreferences prefs=getSharedPreferences("publication-record-migrations",MODE_PRIVATE);
+        JSONArray rows=publications.list();for(int i=0;i<rows.length();i++){String id=rows.getJSONObject(i).getString("id");if(prefs.getBoolean(id,false))continue;try{adoptPublication(publications.get(id));prefs.edit().putBoolean(id,true).commit();}catch(Exception error){event("notice",new JSONObject().put("message","旧资料转入创作记录失败："+cleanError(error)));}}
+    }
+    private void importPublication(Uri uri){
+        if(!publicationImportBusy.compareAndSet(false,true))return;
+        try{event("publicationImport",new JSONObject().put("state","loading"));}catch(Exception ignored){}
+        tasks.execute(()->{try{JSONObject record=adoptPublication(publications.importZip(uri));event("publicationImport",new JSONObject().put("state","complete").put("record",record));}catch(Exception error){try{event("publicationImport",new JSONObject().put("state","failed").put("message",cleanError(error)));}catch(Exception ignored){}}finally{publicationImportBusy.set(false);}});
+    }
     private void handleShare(Intent intent) {
+        String action=intent.getAction();Uri shared=Intent.ACTION_VIEW.equals(action)?intent.getData():intent.getParcelableExtra(Intent.EXTRA_STREAM);String mime=intent.getType();String name=shared==null?"":shared.toString();
+        if(shared!=null&&(Intent.ACTION_VIEW.equals(action)||"application/zip".equals(mime)||"application/x-zip-compressed".equals(mime)||"application/octet-stream".equals(mime)||name.toLowerCase(Locale.ROOT).endsWith(".zip"))){importPublication(shared);intent.setAction(null);intent.setData(null);intent.removeExtra(Intent.EXTRA_STREAM);return;}
         if(!Intent.ACTION_SEND.equals(intent.getAction()))return;
         Uri uri=intent.getParcelableExtra(Intent.EXTRA_STREAM);
         if(uri!=null)readAttachment(uri,"attachment");else{String text=intent.getStringExtra(Intent.EXTRA_TEXT);if(text!=null){try{JSONObject data=new JSONObject();data.put("kind","text");data.put("name","分享内容");data.put("text",text);event("attachment",data);}catch(Exception ignored){}}}
     }
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);
+        if(request==EXPORT_ARTICLE_REVISION){articleRevisionExportBusy.set(false);Uri destination=data==null?null:data.getData();if(result==RESULT_OK&&destination!=null)tasks.execute(()->{try{ArticleRevisionExport.save(this,destination);event("notice",new JSONObject().put("message","改稿已导出，可在知流导入对照"));}catch(Exception error){try{event("notice",new JSONObject().put("message","改稿导出失败："+cleanError(error)));}catch(Exception ignored){}}});return;}
+        if(request==PICK_PUBLICATION){if(result==RESULT_OK&&data!=null&&data.getData()!=null)importPublication(data.getData());return;}
+        if(request==EXPORT_ANALYSIS){
+            Uri destination=data==null?null:data.getData();
+            if(result!=RESULT_OK||destination==null){try{event("analysisExport",AnalysisExportManager.cancel(this));}catch(Exception ignored){}return;}
+            tasks.execute(()->{try{event("analysisExport",AnalysisExportManager.save(this,destination));}catch(Exception error){try{event("notice",new JSONObject().put("message","分析导出失败，请重试"));}catch(Exception ignored){}}});return;
+        }
+        if(request==16){if(result==RESULT_OK)tasks.execute(()->{try{JSONObject s=FeishuImport.pending(this);if(s!=null)event("feishuReady",store.feishuPreview(s));}catch(Exception ex){try{event("notice",new JSONObject().put("message",cleanError(ex)));}catch(Exception ignored){}}});return;}
         if(request==EXPORT_IMAGE){String imageId=imageExportId;imageExportId="";Uri destination=data==null?null:data.getData();
             if(result!=RESULT_OK||destination==null){try{event("notice",new JSONObject().put("message","已取消图片保存"));}catch(Exception ignored){}return;}
             tasks.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(destination,"wt")){RecordImageExport.write(this,imageId,out);event("notice",new JSONObject().put("message","图片已保存到所选位置"));}catch(Exception ex){try{event("notice",new JSONObject().put("message","图片保存失败："+cleanError(ex)));}catch(Exception ignored){}}});return;

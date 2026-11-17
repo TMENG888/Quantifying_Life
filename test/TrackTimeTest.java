@@ -107,7 +107,7 @@ public class TrackTimeTest extends Instrumentation {
     @Override public void onStart(){Bundle out=new Bundle();int code=Activity.RESULT_CANCELED;String previous=getTargetContext().getSharedPreferences("secure",0).getString("settings",null);try{
         // Avoid any background model request while exercising unrelated local tracking UI.
         getTargetContext().getSharedPreferences("secure",0).edit().remove("settings").commit();
-        h=new MainHost(this);h.open();h.js("AutoWiki.pause();AutoWiki.kick=()=>{}");seed();nativeChecks();uiChecks();
+        h=new MainHost(this);h.open();h.js("AutoWiki.kick=()=>{}");seed();nativeChecks();uiChecks();
         if(landscape)check(h.js("innerWidth>innerHeight").equals("true"),"Actual Android landscape viewport verified");
         if(night){check((getTargetContext().getResources().getConfiguration().uiMode&android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES,"Android night mode active");check(h.js("getComputedStyle(document.querySelector('.track-time')).backgroundColor==='rgb(255, 255, 255)'").equals("true"),"Existing light app theme remains readable in system night mode");}
         try(TrackStore db=new TrackStore(getTargetContext())){check(db.diagnostics(date).getJSONArray("rawPoints").toString().equals(raw),"All interactions leave raw positions unchanged");check(db.gpx(date).equals(gpx)&&db.gpx(date,true).equals(original),"Processed and raw GPX exactly unchanged");db.deleteDay(date);}

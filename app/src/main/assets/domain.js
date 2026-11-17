@@ -26,7 +26,7 @@
   function learningTitle(note){const text=String(note||'').replace(/^(?:我)?(?:今天|刚刚|刚才)?(?:学习|阅读|看|读)(?:了)?(?:这个|这篇|这段)?(?:视频|文章|内容)?(?:内容)?[，,：:\s]*(?:有关|关于)?/,'').trim(),parts=text.split(/[\n。！？!?，,；;]/).map(s=>s.replace(/^(?:为最近的一个|这是一个|为一个|是一个|有关|关于)/,'').trim()).filter(Boolean);let title='';for(const part of parts.slice(0,3)){if(title.length+part.length+3>40)break;title+=(title?' · ':'')+part;}return title||(parts[0]?parts[0].slice(0,39)+(parts[0].length>39?'…':''):'学习笔记');}
   function validLocalTime(s){return typeof s==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(s)&&Number.isFinite(Date.parse(s))&&localTime(new Date(s))===s;}
   function validate(r,now=Date.now()) {
-    if (!r || !['learning','work','work_note','idea','experience'].includes(r.type)) throw Error('记录类型不正确');
+    if (!r || !['learning','work','work_note','idea','experience','creation'].includes(r.type)) throw Error('记录类型不正确');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(r.date || '') || localDate(new Date(r.date+'T12:00:00')) !== r.date) throw Error('日期无效');
     if (typeof r.title!=='string'||!r.title.trim()||r.title.length>300) throw Error('请填写标题，最多 300 字');
     if (r.tags!==undefined&&(!Array.isArray(r.tags)||r.tags.some(t=>typeof t!=='string'))) throw Error('标签格式不正确');
@@ -36,12 +36,13 @@
     if(r.evidenceType!==undefined&&!['none','self','practice','tested'].includes(r.evidenceType))throw Error('掌握证据格式不正确');
     if(r.evidenceNote!==undefined&&(typeof r.evidenceNote!=='string'||r.evidenceNote.length>5000))throw Error('掌握证据最多5000字');
     if (!Number.isFinite(Number(r.durationMinutes)) || Number(r.durationMinutes)<0 || Number(r.durationMinutes)>10080) throw Error('时长应为 0～10080 分钟');
+    if(r.type==='creation'){if(typeof r.note!=='string'||!r.note.trim())throw Error('请填写创作正文');if(Number(r.durationMinutes)!==0||r.workStart||r.workEnd||r.studyTiming)throw Error('创作稿件不包含学习或班次工时');if(r.creatorPlatform!==undefined&&(typeof r.creatorPlatform!=='string'||r.creatorPlatform.length>100))throw Error('发布平台最多100字');if(r.creationStatus!==undefined&&!['draft','ready','published'].includes(r.creationStatus))throw Error('稿件状态无效');if(r.publishedUrl!==undefined&&(typeof r.publishedUrl!=='string'||r.publishedUrl.length>4000||r.publishedUrl&&!/^https?:\/\/[^\s]+$/i.test(r.publishedUrl)))throw Error('已发布链接应为有效的http或https地址');if(r.occurredAt&&(!validLocalTime(r.occurredAt)||r.occurredAt.slice(0,10)!==r.date))throw Error('稿件时间与日期不一致');}
     if(r.type==='work_note'){if(typeof r.note!=='string'||!r.note.trim())throw Error('请填写工作日志内容，');if(Number(r.durationMinutes)!==0||r.workStart||r.workEnd)throw Error('工作日志不包含班次或工时');if(r.occurredAt&&(!validLocalTime(r.occurredAt)||r.occurredAt.slice(0,10)!==r.date))throw Error('工作日志时间与日期不一致');}
     if(isThought(r)){
-      if(!validLocalTime(r.occurredAt)||r.occurredAt.slice(0,10)!==r.date)throw Error('灵感／经验的发生时间无效，日期须与时间点一致');
-      if(typeof r.note!=='string'||!r.note.trim())throw Error('请填写灵感或经验内容，');
-      if(Number(r.durationMinutes)!==0)throw Error('灵感／经验不记录学习或工作时长');
-      if((r.masteryLevel&&r.masteryLevel!=='unspecified')||(r.evidenceType&&r.evidenceType!=='none'))throw Error('灵感／经验不作为掌握程度证据');
+      if(!validLocalTime(r.occurredAt)||r.occurredAt.slice(0,10)!==r.date)throw Error('随笔的发生时间无效，日期须与时间点一致');
+      if(typeof r.note!=='string'||!r.note.trim())throw Error('请填写随笔内容，');
+      if(Number(r.durationMinutes)!==0)throw Error('随笔不记录学习或工作时长');
+      if((r.masteryLevel&&r.masteryLevel!=='unspecified')||(r.evidenceType&&r.evidenceType!=='none'))throw Error('随笔不作为掌握程度证据');
     }
     if (r.type === 'work') {
       if(r.breaks!==undefined&&!Array.isArray(r.breaks))throw Error('休息时间格式不正确');
@@ -125,6 +126,7 @@
       let score=tokens.reduce((s,t)=>s+(corpus.includes(t)?1:0),0);
       if (/学习|阅读|文章|视频/.test(question)&&r.type==='learning') score++;
       if (/工作|上班|休息|下班/.test(question)&&['work','work_note'].includes(r.type)) score++;
+      if (/随笔/.test(question)&&isThought(r)) score+=2;
       if (/灵感|创意|点子/.test(question)&&r.type==='idea') score+=2;
       if (/经验|感悟|启发|反思/.test(question)&&r.type==='experience') score+=2;
       return {record:r,score};
@@ -148,7 +150,7 @@
     let result;
     try { result=JSON.parse(raw); } catch { const a=raw.indexOf('{'),b=raw.lastIndexOf('}'); if(a<0||b<a)throw Error('模型没有返回可识别的数据，请换用支持 JSON 输出的模型或重新描述'); result=JSON.parse(raw.slice(a,b+1)); }
     if(typeof result.answer!=='string') throw Error('模型回复格式不正确');
-    return {answer:result.answer,records:allowRecords?aiRecords(result.records||[]):[],citations:Array.isArray(result.citations)?result.citations.map(String):[]};
+    return {answer:result.answer,followUps:Array.isArray(result.followUps)?result.followUps.filter(v=>typeof v==='string').slice(0,3):[],records:allowRecords?aiRecords(result.records||[]):[],citations:Array.isArray(result.citations)?result.citations.map(String):[]};
   }
   const api={localDate,localTime,uid,validate,workMinutes,workMinutesOnDate,workMinutesInRange,questionPeriod,localContext,duplicate,similar,retrieval,aiRecords,parseAI,normalizeText,isThought,thoughtTitle,learningTitle,missingLearningTitle,genericLearningTitle,splitLearningInput,validLocalTime};
   if(typeof module==='object'&&module.exports)module.exports=api; else root.LifeDomain=api;

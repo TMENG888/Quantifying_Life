@@ -1,0 +1,8 @@
+.record-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;width:100%;margin:12px 0;min-width:0;text-align:left;color:var(--ink)}
+.record-metric{display:flex;flex-direction:column;gap:3px;min-width:0;line-height:1.45}
+.record-metric-label{color:var(--muted);font-size:12px}
+.record-metric strong{font-size:18px;font-variant-numeric:tabular-nums;font-weight:600;line-height:1.5;overflow-wrap:anywhere}
+.record-metric small{font-size:11px;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}
+.record-metrics.is-compact{margin:10px 0 0;padding-top:10px;border-top:1px solid var(--line);gap:8px}
+.record-metrics.is-compact .record-metric strong{font-size:15px;font-weight:500}
+@media(max-width:360px){.record-metric strong{font-size:16px}.record-metric small{font-size:10px}}

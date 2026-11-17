@@ -1,0 +1,35 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: xuanhuang (by request) · redesign: full · nav: four retained destinations · signature: field ledger · posture: committed · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E3 S4 R4 V3 · weakest: E, centralized legacy colors and spacing before responsive review */
+.feishu-dialog{--feishu-secondary:var(--line);width:min(600px,calc(100% - 24px));max-height:90dvh;padding:0;border:0;border-radius:24px;background:var(--bg);color:var(--ink);overflow:auto;box-sizing:border-box}
+.feishu-dialog::backdrop{background:var(--color-scrim-soft)}
+.feishu-dialog:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.feishu-head{display:flex;justify-content:space-between;align-items:center;padding:var(--space-md) var(--space-lg);border-bottom:1px solid var(--line)}
+.feishu-head span,.feishu-source,.feishu-summary{font-size:13px;color:var(--feishu-secondary)}
+.feishu-head h2{font-size:21px;margin:var(--space-xs) 0 0}
+.feishu-head button{min-width:48px;min-height:48px;border:0;background:transparent;color:inherit;flex:none}
+.feishu-head svg{width:24px;height:24px;vertical-align:middle}
+.feishu-content{padding:var(--space-lg)}
+.feishu-title{font-size:23px;margin:var(--space-md) 0;overflow-wrap:anywhere}
+.feishu-source{overflow-wrap:anywhere}
+.feishu-label{display:block;margin-bottom:var(--space-xs)}
+.feishu-content input:not([type=checkbox]){box-sizing:border-box;width:100%;min-width:0;min-height:48px;border:1px solid var(--line);border-radius:12px;padding:var(--space-sm);background:var(--surface);color:var(--ink);font:inherit}
+.feishu-fields{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md);margin:var(--space-lg) 0}
+.feishu-fields label{font-size:14px;min-width:0}
+.feishu-fields input{margin-top:var(--space-xs)}
+.feishu-existing,.feishu-warnings{padding:var(--space-sm) var(--space-md);background:var(--soft);border-radius:12px;font-size:14px;line-height:1.6}
+.feishu-warnings ul{padding-left:var(--space-md);margin:var(--space-xs) 0 0}
+.feishu-ack{display:flex;align-items:flex-start;gap:var(--space-sm);padding:var(--space-md) 0;font-size:14px;line-height:1.6;min-height:48px}
+.feishu-ack input{width:24px;height:24px;flex:none;accent-color:var(--green)}
+.feishu-original{margin:var(--space-lg) 0}
+.feishu-original summary,.feishu-warnings summary{cursor:pointer;min-height:48px;display:list-item;padding:var(--space-sm) 0}
+.feishu-original article{border-top:1px solid var(--line);padding-top:var(--space-md);max-height:40dvh;overflow:auto;overflow-wrap:anywhere;font-size:16px;line-height:1.75}
+.feishu-original article img{max-width:100%;height:auto}
+.feishu-buttons{display:flex;flex-direction:column;gap:var(--space-sm);margin-top:var(--space-lg)}
+.feishu-buttons button{min-height:48px;white-space:normal}
+.feishu-dialog button:active{filter:brightness(.94)}
+.feishu-error{color:var(--danger);background:var(--soft);border-radius:12px;padding:var(--space-sm);line-height:1.6;font-size:14px}
+.feishu-error[hidden]{display:none}
+.feishu-loading{padding:var(--space-lg) 0;line-height:1.7}
+@media(max-width:360px){.feishu-content{padding:var(--space-md)}.feishu-fields{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){.feishu-dialog *{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+.feishu-date-source button{min-height:48px;padding:var(--space-2xs) var(--space-xs);color:var(--green);background:transparent;border-radius:10px;font:inherit}

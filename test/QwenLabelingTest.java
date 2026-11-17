@@ -1,0 +1,112 @@
+package com.insight.quantlife.tests;
+import android.app.*;import android.app.job.*;import android.content.*;import android.database.Cursor;import android.database.sqlite.SQLiteDatabase;import android.os.*;
+import com.insight.quantlife.*;import org.json.*;import java.io.*;import java.net.*;import java.nio.charset.StandardCharsets;import java.util.*;import java.util.concurrent.*;
+
+/** Synthetic transport/DB checks; real phase explicitly receives a temporary key and a local export. */
+public class QwenLabelingTest extends DocumentEditorTest {
+ Bundle args;int calls=0;JSONObject lastBody;
+ @Override public void onCreate(Bundle b){args=b;super.onCreate(b);}
+ void schema(SQLiteDatabase db){db.execSQL("CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,date TEXT,payload TEXT)");db.execSQL("CREATE TABLE IF NOT EXISTS wiki_queue(id TEXT PRIMARY KEY,version INTEGER NOT NULL,operation TEXT NOT NULL)");}
+ JSONObject row(String id,String note)throws Exception{return new JSONObject().put("id",id).put("type","learning").put("date","2026-10-29").put("title","合成学习记录").put("note",note).put("durationMinutes",25).put("tags",new JSONArray().put("人工智能")).put("updatedAt",10);}
+ void put(SQLiteDatabase db,JSONObject r)throws Exception{db.execSQL("INSERT OR REPLACE INTO records(id,date,payload) VALUES(?,?,?)",new Object[]{r.getString("id"),r.optString("date"),r.toString()});}
+ JSONObject get(SQLiteDatabase db,String id)throws Exception{try(Cursor c=db.rawQuery("SELECT payload FROM records WHERE id=?",new String[]{id})){return c.moveToFirst()?new JSONObject(c.getString(0)):null;}}
+ JSONObject reply(JSONObject input,String quote)throws Exception{return new JSONObject().put("recordId",input.getString("recordId")).put("primary","understand").put("topics",new JSONArray().put("检索策略")).put("domains",new JSONArray().put("AI 与技术")).put("evidence",new JSONArray().put(new JSONObject().put("kind","concept").put("quote",quote).put("claim","对检索策略的说明").put("actor","source").put("status","described")));}
+ void nativeChecks()throws Exception{
+  check(QwenTransport.config(new JSONObject())==null,"No image key means waiting, never falls back to the chat key");
+  JSONObject config=QwenTransport.config(new JSONObject().put("imageGeneration",new JSONObject().put("apiKey","synthetic-key").put("workspaceId","llm-example")));
+  check(config.getString("endpoint").equals("https://llm-example.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"),"Reuses the illustration credential and correct workspace endpoint");
+  check(!QwenTransport.config(new JSONObject().put("imageGeneration",new JSONObject().put("apiKey","x"))).getString("endpoint").contains("image-generation"),"Default text endpoint is separate from image generation");
+  try(SQLiteDatabase db=SQLiteDatabase.create(null)){
+   schema(db);StringBuilder text=new StringBuilder();for(int i=0;i<11000;i++)text.append("检索🙂");text.append("最后一段不能遗漏");JSONObject r=row("long",text.toString());put(db,r);StringBuilder read=new StringBuilder();int count=0;
+   while(!QwenLabels.current(get(db,"long"))){QwenLabels.step(db,r,in->{String chunk=in.getString("note");read.append(chunk);return reply(in,chunk.substring(0,Math.min(40,chunk.length())));});count++;}
+   JSONObject saved=get(db,"long");check(count>3&&read.toString().equals(text.toString()),"Every long-note character is read, including emoji and the tail");
+   check(saved.getString("note").equals(r.getString("note"))&&saved.getLong("updatedAt")==10&&saved.getDouble("durationMinutes")==25&&saved.getJSONArray("tags").toString().equals(r.getJSONArray("tags").toString()),"Only derived labels change; original text, tags, minutes and version survive");
+   check(saved.getJSONObject("quantLabels").getInt("chunks")==count&&saved.getJSONArray("wikiDomains").getString(0).equals("AI 与技术"),"Evidence labeling also updates Wiki domains and records full chunk coverage");
+   for(int i=0;i<saved.getJSONObject("quantLabels").getJSONArray("evidence").length();i++){JSONObject ev=saved.getJSONObject("quantLabels").getJSONArray("evidence").getJSONObject(i);check(r.getString("note").substring(ev.getInt("start"),ev.getInt("end")).equals(ev.getString("quote")),"UTF16 source span is exact: "+i);}
+   JSONObject bad=row("bad","这是本人的原文内容，不允许凭空编造证据。");put(db,bad);boolean invalid=false;try{QwenLabels.step(db,bad,in->reply(in,"完全不存在于原文的证据片段"));}catch(Exception expected){invalid=true;}check(invalid&&!get(db,"bad").has("quantLabels"),"Invented quote leaves the source pending instead of fabricating a label");
+   JSONObject anchored=new JSONObject().put("note","原文的chain\\_type保留转义。\n\n原文的两段内容不会被拼接或改标点。🙂").put("offset",100);JSONArray spans=QwenLabels.sources(anchored.getString("note"),100);anchored.put("sources",spans);JSONObject picked=reply(new JSONObject().put("recordId","anchor"),"ignored");picked.getJSONArray("evidence").getJSONObject(0).remove("quote");picked.getJSONArray("evidence").getJSONObject(0).put("sourceId",spans.getJSONObject(0).getString("id"));JSONObject exact=QwenLabels.validate(row("anchor",anchored.getString("note")),anchored,picked).getJSONArray("evidence").getJSONObject(0);
+   check(exact.getString("quote").equals(anchored.getString("note"))&&exact.getInt("start")==100,"Source IDs preserve Markdown escapes, punctuation, newlines and exact offsets");
+   picked.getJSONArray("evidence").getJSONObject(0).put("sourceId","s999999");invalid=false;try{QwenLabels.validate(row("anchor",anchored.getString("note")),anchored,picked);}catch(Exception expected){invalid=true;}check(invalid,"Invented source IDs cannot become evidence");
+   JSONObject stale=row("stale","这是用户原始笔记正文，后续将修改。");put(db,stale);boolean applied=QwenLabels.step(db,stale,in->{put(db,row("stale","这是用户新写的原文内容，保留不覆盖。").put("updatedAt",11));return reply(in,"这是用户原始笔记正文");});check(!applied&&!get(db,"stale").has("quantLabels")&&get(db,"stale").optLong("updatedAt")==11,"In-flight old result cannot overwrite a concurrently edited source");
+   JSONObject gone=row("gone","这是即将被删除的正文内容，不可复活。");put(db,gone);QwenLabels.step(db,gone,in->{db.delete("records","id=?",new String[]{"gone"});return reply(in,"这是即将被删除的正文内容");});check(get(db,"gone")==null,"Deleting during a request never recreates the record");
+   JSONObject changed=new JSONObject(saved.toString()).put("note",saved.getString("note")+"新文字");check(!QwenLabels.current(changed),"Content hash detects changes even if an external importer reuses a version");
+   JSONObject in=new JSONObject().put("recordId","source").put("note","文章描述了其他企业进行实验并取得测量结果。").put("offset",0),source=row("source",in.getString("note"));
+   JSONObject a=reply(in,in.getString("note")).put("primary","apply");a.getJSONArray("evidence").getJSONObject(0).put("kind","application").put("actor","source").put("status","completed");check(QwenLabels.validate(source,in,a).getString("primary").equals("reference"),"Quoted third-party application cannot become the author's practice");
+   a.getJSONArray("evidence").getJSONObject(0).put("actor","self").put("status","planned");check(QwenLabels.validate(source,in,a).getString("primary").equals("plan"),"Planned application is assigned to plans rather than completed practice");
+   JSONObject body=QwenTransport.body(in);check(body.getString("model").equals("qwen3.7-flash")&&!body.getBoolean("enable_thinking")&&body.getInt("max_tokens")==4096&&body.getJSONObject("tool_choice").getJSONObject("function").getString("name").equals("label_record_evidence"),"Transport fixes model, bounded output, disabled thinking and structured tool response");
+  }
+  File file=new File(getTargetContext().getFilesDir(),"qwen-resume-test.db");file.delete();JSONObject resume=row("resume",String.join("",Collections.nCopies(1400,"学习检索的原文内容。")));
+  try(SQLiteDatabase db=SQLiteDatabase.openOrCreateDatabase(file,null)){schema(db);put(db,resume);QwenLabels.step(db,resume,in->reply(in,in.getString("note").substring(0,20)));}
+  try(SQLiteDatabase db=SQLiteDatabase.openOrCreateDatabase(file,null)){final int[] offset={0};QwenLabels.step(db,resume,in->{offset[0]=in.getInt("offset");return reply(in,in.getString("note").substring(0,20));});check(offset[0]>0&&QwenLabels.current(get(db,"resume")),"Closing and reopening SQLite resumes at the durable checkpoint");}finally{file.delete();}
+  JSONObject state=new JSONObject().put("requests",new JSONArray().put(new JSONObject().put("id","busy").put("at",100000).put("tokens",3999990)));boolean limited=false;try{QwenBudget.reserve(state,100001,100);}catch(QwenTransport.Failure f){limited=f.code==429;}check(limited,"TPM ceiling is 4M tokens, including reservations");
+  QwenBudget.reconcile(state,"busy",10);QwenBudget.reserve(state,100002,100);check(state.getJSONArray("requests").length()==2,"Actual token reconciliation releases the unused reservation");
+  JSONArray requests=new JSONArray();for(int i=0;i<QwenBudget.RPM;i++)requests.put(new JSONObject().put("at",100000).put("id","r"+i).put("tokens",1));state.put("requests",requests);limited=false;try{QwenBudget.reserve(state,100003,1);}catch(QwenTransport.Failure f){limited=true;}check(limited,"RPM ceiling is 24,000 independently of TPM");QwenBudget.reserve(state,160001,10);check(state.getJSONArray("requests").length()==1,"Rate window expires old calls after one minute");
+  transportCheck(200);transportCheck(429);transportCheck(401);
+ }
+ void transportCheck(int code)throws Exception{
+  ServerSocket server=new ServerSocket(0,4,InetAddress.getByName("127.0.0.1"));Thread thread=new Thread(()->{try(Socket socket=server.accept()){
+   InputStream in=socket.getInputStream();ByteArrayOutputStream head=new ByteArrayOutputStream();String headers="";int b;while((b=in.read())>=0){head.write(b);headers=head.toString("ISO-8859-1");if(headers.endsWith("\r\n\r\n"))break;}
+   int length=0;for(String line:headers.split("\r\n"))if(line.toLowerCase(Locale.ROOT).startsWith("content-length:"))length=Integer.parseInt(line.substring(15).trim());byte[] bytes=new byte[length];int at=0;while(at<length){int n=in.read(bytes,at,length-at);if(n<0)throw new IOException();at+=n;}lastBody=new JSONObject(new String(bytes,StandardCharsets.UTF_8));
+   JSONObject input=new JSONObject(lastBody.getJSONArray("messages").getJSONObject(1).getString("content"));String body=code==200?new JSONObject().put("choices",new JSONArray().put(new JSONObject().put("finish_reason","tool_calls").put("message",new JSONObject().put("tool_calls",new JSONArray().put(new JSONObject().put("function",new JSONObject().put("name","label_record_evidence").put("arguments",reply(input,input.getJSONArray("sources").getJSONObject(0).getString("text")).toString()))))))).put("usage",new JSONObject().put("total_tokens",50)).toString():"{\"error\":\"DO_NOT_ECHO_PROVIDER_SECRET\"}";
+   byte[] output=body.getBytes(StandardCharsets.UTF_8);OutputStream out=socket.getOutputStream();out.write(("HTTP/1.1 "+code+" Test\r\nContent-Type: application/json\r\nRetry-After: 61\r\nContent-Length: "+output.length+"\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));out.write(output);out.flush();
+  }catch(Exception ignored){}finally{try{server.close();}catch(Exception ignored){}}});thread.start();
+  JSONObject c=new JSONObject().put("endpoint","http://127.0.0.1:"+server.getLocalPort()+"/chat/completions").put("apiKey","synthetic-local-key"),in=new JSONObject().put("recordId","test").put("note","这是合成的模型接口测试原文。").put("offset",0);
+  try{JSONObject response=QwenTransport.ask(getTargetContext(),c,in);check(code==200&&response.getString("recordId").equals("test"),"Native HTTP structured tool response is parsed");}catch(QwenTransport.Failure failure){check(code==failure.code&&!failure.getMessage().contains("DO_NOT_ECHO"),"Provider errors are sanitized: "+code);if(code==429)check(failure.retryMs>=61000,"Retry-After is respected instead of immediate resubmission");}finally{thread.join(2000);server.close();}
+ }
+ void realChecks()throws Exception{
+  String secret=args.getString("key",""),workspace=args.getString("workspace","");if(secret.isEmpty())throw new Exception("Real phase requires an explicitly supplied temporary credential");
+  JSONObject config=QwenTransport.config(new JSONObject().put("imageGeneration",new JSONObject().put("apiKey",secret).put("workspaceId",workspace)));
+  JSONObject data=new JSONObject(new String(java.nio.file.Files.readAllBytes(new File(args.getString("input")).toPath()),StandardCharsets.UTF_8));JSONArray source=data.getJSONArray("records");List<JSONObject> eligible=new ArrayList<>();
+  try(SQLiteDatabase db=SQLiteDatabase.openOrCreateDatabase(new File(getTargetContext().getFilesDir(),"qwen-real-checkpoints.db"),null)){
+   schema(db);for(int i=0;i<source.length();i++){JSONObject r=source.getJSONObject(i),prior=get(db,r.getString("id"));if(prior==null||!QwenLabels.hash(prior).equals(QwenLabels.hash(r)))put(db,r);if(QwenLabels.eligible(r))eligible.add(r);}
+   ExecutorService pool=Executors.newFixedThreadPool(4);List<Future<String>> tasks=new ArrayList<>();try{
+    for(JSONObject r:eligible)tasks.add(pool.submit(()->{int attempts=0;while(!QwenLabels.current(get(db,r.getString("id")))){
+     try{QwenLabels.step(db,r,in->{JSONObject response=QwenTransport.ask(getTargetContext(),config,in);try{QwenLabels.validate(r,in,response);}catch(Exception invalid){synchronized(this){try(FileOutputStream out=getTargetContext().openFileOutput("qwen-invalid.json",0)){out.write(new JSONObject().put("input",in).put("answer",response).toString().getBytes(StandardCharsets.UTF_8));}}throw invalid;}return response;});attempts=0;synchronized(this){calls++;Bundle b=new Bundle();b.putString("stream","REAL_CHUNK "+calls+"\n");sendStatus(0,b);}}
+     catch(Exception failure){if(++attempts>=3)throw failure;}
+    }return r.getString("id");}));
+    for(Future<String> f:tasks)f.get();
+   }finally{pool.shutdownNow();}
+   JSONArray results=new JSONArray();int count=0;for(int i=0;i<source.length();i++){JSONObject original=source.getJSONObject(i),r=get(db,original.getString("id"));
+    if(QwenLabels.eligible(r)){if(!QwenLabels.current(r))throw new Exception("Incomplete real source");count++;}
+    if(!original.optString("note").equals(r.optString("note"))||original.optLong("updatedAt")!=r.optLong("updatedAt")||original.optDouble("durationMinutes",0)!=r.optDouble("durationMinutes",0))throw new Exception("Source changed during real labeling");results.put(r);
+   }
+   data.put("records",results).put("qwenValidation",new JSONObject().put("model",QwenLabels.MODEL).put("labeled",count).put("requests",calls).put("at",System.currentTimeMillis()));
+   try(FileOutputStream out=getTargetContext().openFileOutput("qwen-real-labeled.json",0)){out.write(data.toString().getBytes(StandardCharsets.UTF_8));}
+   check(count==eligible.size(),"Actual Qwen labeled every eligible exported note with exact source quotes");int chunks=0;for(JSONObject r:eligible)chunks+=get(db,r.getString("id")).getJSONObject("quantLabels").getInt("chunks");check(chunks>=count,"Real batch covers long-note chunks without source truncation");
+  }
+  backgroundCheck(secret,workspace);
+ }
+ void backgroundCheck(String secret,String workspace)throws Exception{
+  SharedPreferences secure=getTargetContext().getSharedPreferences("secure",0);String before=secure.getString("settings",null);String id="qwen-background-synthetic";
+  try{
+   h=new MainHost(this);h.open();until("typeof document.querySelector('[data-page=records]').onclick==='function'");h.js("AutoWiki.kick=()=>{};AutoWiki.resume=()=>{}");JSONObject r=row(id,"我今天修改了统一的重试机制，并且已经完成回归测试，测试通过率为95%。后续计划补充更多案例。");
+   h.call("saveRecord",new JSONObject().put("record",r).put("allowDuplicate",true));h.call("saveImageSettings",new JSONObject().put("settings",new JSONObject().put("apiKey",secret).put("workspaceId",workspace).put("model","qwen-image-2.1-turbo")));
+   long version=record(id).getLong("updatedAt");runOnMainSync(()->h.activity.finish());h=null;
+   try(ParcelFileDescriptor p=getUiAutomation().executeShellCommand("cmd jobscheduler run -f com.insight.quantlife 7305")){try(FileInputStream in=new FileInputStream(p.getFileDescriptor())){byte[] bytes=new byte[1024];while(in.read(bytes)>=0){}}}
+   boolean done=false;for(int i=0;i<500;i++){try(SQLiteDatabase db=SQLiteDatabase.openDatabase(getTargetContext().getDatabasePath("quantlife.db").getPath(),null,SQLiteDatabase.OPEN_READWRITE|SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING)){JSONObject current=get(db,id);done=current!=null&&QwenLabels.current(current);}if(done)break;Thread.sleep(200);}
+   check(done,"Actual JobService labels with the reused image credential after Activity exit");h=new MainHost(this);h.open();h.js("AutoWiki.kick=()=>{};AutoWiki.resume=()=>{}");JSONObject result=record(id);check(result.getLong("updatedAt")==version&&result.has("quantLabels"),"Background labeling persists without changing record version");
+   click("[data-page=records]");click("#topic-entry");check(h.js("!!document.querySelector('.quant-card')&&!document.querySelector('.evidence-duration')").equals("true"),"Production dashboard renders Qwen content analysis and removes duration scatter");
+   h.screenshot("qwen-real-dashboard.png");result.put("note",result.getString("note")+"补充：我又修改了一条配置。");h.call("saveRecord",new JSONObject().put("record",result).put("allowDuplicate",true));check(!QwenLabels.current(record(id)),"Editing a labeled record makes the old result stale and queues a new run");h.call("deleteRecord",new JSONObject().put("id",id));
+  }finally{
+   getTargetContext().getSystemService(JobScheduler.class).cancel(7305);getTargetContext().getSystemService(JobScheduler.class).cancel(7304);SharedPreferences.Editor restore=secure.edit();if(before==null)restore.remove("settings");else restore.putString("settings",before);restore.commit();if(h!=null)try{h.call("deleteRecord",new JSONObject().put("id",id));}catch(Exception ignored){}
+  }
+ }
+ void dashboardChecks()throws Exception{
+  JSONObject data=new JSONObject(new String(java.nio.file.Files.readAllBytes(new File(args.getString("input")).toPath()),StandardCharsets.UTF_8));JSONArray rows=data.getJSONArray("records");
+  h=new MainHost(this);h.open();h.js("AutoWiki.kick=()=>{};AutoWiki.resume=()=>{}");runOnMainSync(()->h.activity.finish());
+  getTargetContext().getSystemService(JobScheduler.class).cancel(7304);getTargetContext().getSystemService(JobScheduler.class).cancel(7305);
+  try(SQLiteDatabase db=SQLiteDatabase.openDatabase(getTargetContext().getDatabasePath("quantlife.db").getPath(),null,SQLiteDatabase.OPEN_READWRITE)){
+   db.beginTransaction();try{db.delete("records",null,null);for(int i=0;i<rows.length();i++){JSONObject r=rows.getJSONObject(i);android.content.ContentValues v=new android.content.ContentValues();for(String k:new String[]{"id","type","date","title","platform"})v.put(k,r.optString(k));v.put("payload",r.toString());db.insertOrThrow("records",null,v);}db.setTransactionSuccessful();}finally{db.endTransaction();}
+  }
+  h=new MainHost(this);h.open();h.js("AutoWiki.kick=()=>{};AutoWiki.resume=()=>{}");click("[data-page=records]");click("#topic-entry");click("[data-topic-range=all]");
+  check(h.js("document.querySelector('.quant-card .evidence-heading').innerText.includes('17/17')&&!document.querySelector('.evidence-duration')").equals("true"),"All 17 real learning notes appear as labeled; no duration dots");
+  check(h.js("document.querySelector('.quant-card .domain-ring-center strong').textContent==='17'").equals("true"),"Content ring denominator is the labeled note count");
+  h.js("document.querySelector('.quant-card').scrollIntoView({block:'start'})");h.screenshot("qwen-learning.png");
+  click("[data-quant-pick='primary:understand']");check(h.js("document.querySelectorAll('#quant-detail [data-record]').length>0&&[...document.querySelectorAll('#quant-detail blockquote p')].every(e=>e.textContent.trim().length>0)").equals("true"),"Tapping the content legend opens real source notes and original evidence");h.js("document.querySelector('#quant-detail').scrollIntoView({block:'start'})");h.screenshot("qwen-source-evidence.png");
+  String id=h.js("document.querySelector('#quant-detail [data-record]').dataset.record");click("#quant-detail [data-record]");until("!!document.querySelector('#doc-mode')");check(h.js("!!document.querySelector('#doc-flow')").equals("true"),"Evidence source opens the original record reader");close();
+  click("[data-record-tab=work]");check(h.js("document.querySelector('.quant-card .evidence-heading').innerText.includes('10/10')").equals("true"),"Work analyzes ten journals and excludes time-only shifts");h.js("document.querySelector('.quant-card').scrollIntoView({block:'start'})");h.screenshot("qwen-work.png");
+  click("[data-record-tab=thoughts]");check(h.js("document.querySelector('.quant-card .evidence-heading').innerText.includes('7/7')").equals("true"),"Essays include all seven inspiration and experience notes");
+  click("[data-record-tab=learning]");runOnMainSync(()->h.web.getSettings().setTextZoom(200));Thread.sleep(600);check(h.js("document.documentElement.scrollWidth<=innerWidth+1&&[...document.querySelectorAll('.quant-card button')].every(e=>{const r=e.getBoundingClientRect();return r.width===0||r.height>=47&&r.left>=0&&r.right<=innerWidth+1})").equals("true"),"Large text content analysis has no horizontal overflow and retains 48px controls");check(h.js("!!document.querySelector('.quant-card .is-stacked')&&[...document.querySelectorAll('.quant-card .domain-row-heading strong')].every(e=>e.getBoundingClientRect().height<=parseFloat(getComputedStyle(e).lineHeight)*2+1)").equals("true"),"Large text stacks the ring and legend instead of squeezing labels into narrow columns");h.js("document.querySelector('.quant-card').scrollIntoView({block:'start'})");h.screenshot("qwen-large.png");runOnMainSync(()->h.web.getSettings().setTextZoom(100));
+ }
+ @Override public void onStart(){Bundle out=new Bundle();boolean ok=false;try{if(!Build.HARDWARE.matches("ranchu|goldfish"))throw new Exception("Disposable emulator required");if(phase.equals("real"))realChecks();else if(phase.equals("dashboard"))dashboardChecks();else nativeChecks();ok=true;out.putString("stream","PASS QwenLabelingTest "+phase+": "+passed+" checks; real chunks "+calls+"\n");}catch(Throwable error){out.putString("stream","FAIL QwenLabelingTest after "+passed+": "+error.getClass().getSimpleName()+": "+error.getMessage()+"\n"+android.util.Log.getStackTraceString(error));}finish(ok?Activity.RESULT_OK:Activity.RESULT_CANCELED,out);}
+}
